@@ -257,43 +257,29 @@ def stats():
     })
 
 
-# ─── Wines List ───────────────────────────────────────────────────────────────
+# ─── Shared filter builder ────────────────────────────────────────────────────
 
-@app.route("/api/wines")
-@require_api_key
-def wines():
-    page     = int(request.args.get("page", 1))
-    per_page = min(int(request.args.get("per_page", 50)), 200)
-    offset   = (page - 1) * per_page
-
-    search       = request.args.get("search", "").strip()
-    status       = request.args.get("status", "")
-    region       = request.args.get("region", "")
-    colour       = request.args.get("colour", "")
-    vintage      = request.args.get("vintage", "")
-    reviewer     = request.args.get("reviewer", "")
-    min_score    = request.args.get("min_score", "")
-    max_score    = request.args.get("max_score", "")
-    lwin_search  = request.args.get("lwin", "").strip()
-    min_reviews  = request.args.get("min_reviews", "")
-    has_note     = request.args.get("has_note", "")
-    min_note_len = request.args.get("min_note_len", "")
-    date_from    = request.args.get("date_from", "").strip()
-    date_to      = request.args.get("date_to", "").strip()
-    review_year  = request.args.get("review_year", "").strip()
-    source_filter = request.args.get("source", "")
-
-    sort_by  = request.args.get("sort", "maaike_score_20")
-    sort_dir = "DESC" if request.args.get("dir", "desc").lower() == "desc" else "ASC"
-
-    allowed_sorts = {"name","vintage","maaike_score_20","maaike_reviewer","maaike_drink_from",
-                     "maaike_drink_to","region","colour","price_eur","maaike_review_count",
-                     "maaike_note_length","created_at","lwin7","maaike_date_tasted"}
-    if sort_by not in allowed_sorts:
-        sort_by = "maaike_score_20"
-
+def _build_wine_filters(args):
+    """Build WHERE clause + params from request args. Used by /api/wines and /api/download."""
     conds: List[str] = []
     params: List[Any] = []
+
+    search        = args.get("search", "").strip()
+    status        = args.get("status", "")
+    region        = args.get("region", "")
+    colour        = args.get("colour", "")
+    vintage       = args.get("vintage", "")
+    reviewer      = args.get("reviewer", "")
+    min_score     = args.get("min_score", "")
+    max_score     = args.get("max_score", "")
+    lwin_search   = args.get("lwin", "").strip()
+    min_reviews   = args.get("min_reviews", "")
+    has_note      = args.get("has_note", "")
+    min_note_len  = args.get("min_note_len", "")
+    date_from     = args.get("date_from", "").strip()
+    date_to       = args.get("date_to", "").strip()
+    review_year   = args.get("review_year", "").strip()
+    source_filter = args.get("source", "")
 
     if search:
         conds.append("(w.name LIKE ? OR w.appellation LIKE ? OR w.maaike_reviewer LIKE ? OR w.lwin LIKE ? OR w.lwin7 LIKE ?)")
@@ -330,11 +316,32 @@ def wines():
     if date_to:
         conds.append("w.maaike_date_tasted <= ?"); params.append(date_to)
     if source_filter:
-        # Filter wines that have at least one review from this source
         conds.append("EXISTS (SELECT 1 FROM reviews r WHERE r.wine_id=w.id AND r.source=?)")
         params.append(source_filter)
 
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    return where, params
+
+
+# ─── Wines List ───────────────────────────────────────────────────────────────
+
+@app.route("/api/wines")
+@require_api_key
+def wines():
+    page     = int(request.args.get("page", 1))
+    per_page = min(int(request.args.get("per_page", 50)), 200)
+    offset   = (page - 1) * per_page
+
+    sort_by  = request.args.get("sort", "maaike_score_20")
+    sort_dir = "DESC" if request.args.get("dir", "desc").lower() == "desc" else "ASC"
+
+    allowed_sorts = {"name","vintage","maaike_score_20","maaike_reviewer","maaike_drink_from",
+                     "maaike_drink_to","region","colour","price_eur","maaike_review_count",
+                     "maaike_note_length","created_at","lwin7","maaike_date_tasted"}
+    if sort_by not in allowed_sorts:
+        sort_by = "maaike_score_20"
+
+    where, params = _build_wine_filters(request.args)
 
     with get_db() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM wines w {where}", params).fetchone()[0]
@@ -684,29 +691,47 @@ def upload_csv():
 @app.route("/api/download")
 @require_api_key
 def download_csv():
-    status = request.args.get("status", "")
-    only   = request.args.get("only", "")
-    conds, params = [], []
-    if status: conds.append("enrichment_status=?"); params.append(status)
-    if only == "found": conds.append("maaike_score_20 IS NOT NULL")
-    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    # All filter params (same as /api/wines) + include_all flag
+    include_all = request.args.get("include_all", "0") == "1"
+
+    where, params = _build_wine_filters(request.args)
+
+    # If no status filter set and include_all not requested, default to found-only
+    if not request.args.get("status") and not include_all:
+        extra = "w.enrichment_status = 'found'"
+        where = f"WHERE {extra}" if not where else f"{where} AND {extra}"
 
     with get_db() as conn:
         rows = conn.execute(f"""
-            SELECT name, vintage, lwin, lwin7, region, colour, price_eur, price_usd, stock,
-                   maaike_score_20, maaike_reviewer, maaike_drink_from, maaike_drink_to,
-                   maaike_date_tasted, maaike_review_count, maaike_note_length,
-                   maaike_short_quote, maaike_review_url, enrichment_status
-            FROM wines {where} ORDER BY maaike_score_20 DESC
+            SELECT w.name, w.vintage, w.lwin11, w.maaike_reviewer,
+                   w.maaike_score_20, w.maaike_drink_from, w.maaike_drink_to,
+                   w.maaike_date_tasted, w.maaike_short_quote
+            FROM wines w {where}
+            ORDER BY
+                CASE WHEN w.maaike_score_20 IS NULL THEN 1 ELSE 0 END,
+                w.maaike_score_20 DESC
         """, params).fetchall()
 
     out = io.StringIO()
-    w   = csv.writer(out)
-    w.writerow(["Wine Name","Vintage","LWIN","LWIN7","Region","Colour",
-                "Price EUR","Price USD","Stock","Score /20","Reviewer",
-                "Drink From","Drink To","Date Tasted","Review Count","Note Length",
-                "Tasting Note","Jancis URL","Status"])
-    for r in rows: w.writerow(list(r))
+    writer = csv.writer(out)
+    writer.writerow(["Publisher", "LWIN11", "Product_Name", "Vintage",
+                     "Critic_Name", "Score", "Drink_From", "Drink_To",
+                     "Review_Date", "Review"])
+    for r in rows:
+        name, vintage, lwin11, reviewer, score, drink_from, drink_to, date_tasted, note = r
+        writer.writerow([
+            "Jancis Robinson",
+            lwin11 or "",
+            name or "",
+            vintage or "NV",
+            reviewer or "",
+            score if score is not None else "",
+            drink_from or "",
+            drink_to or "",
+            date_tasted or "",
+            note or "",
+        ])
+
     out.seek(0)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Response(out.getvalue(), mimetype="text/csv",
