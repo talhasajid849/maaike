@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>MAAIKE — Wine Intelligence</title>
+<style>
+:root{
+  --bg:#0d1117;--bg2:#161b22;--bg3:#1c2333;--bg4:#21262d;
+  --border:#30363d;--border2:#444c56;
+  --text:#e6edf3;--text2:#8b949e;--text3:#6e7681;
+  --teal:#00bfa5;--teal2:#00897b;--teal3:#004d40;
+  --blue:#388bfd;--green:#3fb950;--red:#f85149;
+  --yellow:#d29922;--orange:#f0883e;--purple:#bc8cff;
+  --r:8px;--r2:12px;--tr:0.18s ease;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;}
+a{color:var(--teal);text-decoration:none;}
+input,select,textarea{background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-size:13px;padding:6px 10px;outline:none;transition:border var(--tr);}
+input:focus,select:focus{border-color:var(--teal);}
+button{cursor:pointer;font-size:13px;border:none;border-radius:var(--r);padding:7px 14px;transition:all var(--tr);}
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:var(--bg2);}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+
+/* ─ Signin ─ */
+#signin-screen{display:none;position:fixed;inset:0;z-index:9999;background:radial-gradient(ellipse at 50% 40%,#0d2137 0%,#0d1117 65%);align-items:center;justify-content:center;}
+#signin-screen.active{display:flex;}
+.sc{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:44px 40px;width:360px;text-align:center;}
+.sc-logo{font-size:34px;font-weight:800;letter-spacing:4px;color:var(--teal);}
+.sc-sub{color:var(--text2);font-size:11px;letter-spacing:2px;margin-bottom:28px;}
+.sc input{width:100%;padding:11px 14px;font-size:15px;margin-bottom:14px;}
+.sc button{width:100%;padding:12px;font-size:15px;font-weight:700;background:var(--teal);color:#000;}
+.sc button:hover{background:var(--teal2);}
+.sc-err{color:var(--red);font-size:12px;margin-top:8px;min-height:18px;}
+
+/* ─ Layout ─ */
+#app{display:none;flex-direction:column;min-height:100vh;}
+#app.active{display:flex;}
+header{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;height:50px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100;}
+.logo{font-size:18px;font-weight:800;letter-spacing:3px;color:var(--teal);white-space:nowrap;}
+.logo span{color:var(--text3);font-weight:400;font-size:11px;letter-spacing:1px;margin-left:8px;}
+nav{display:flex;gap:2px;margin-left:auto;}
+.nb{background:transparent;color:var(--text2);padding:6px 12px;border-radius:var(--r);border:none;font-size:13px;}
+.nb:hover,.nb.active{background:var(--bg4);color:var(--text);}
+.hs{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);}
+.dot.warn{background:var(--yellow);}
+.dot.err{background:var(--red);}
+.dot.pulse{animation:pulse 1.4s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+main{flex:1;padding:18px 20px;max-width:1700px;width:100%;margin:0 auto;}
+.page{display:none;} .page.active{display:block;}
+
+/* ─ Buttons ─ */
+.btn{padding:7px 14px;border-radius:var(--r);font-weight:600;font-size:12px;border:none;cursor:pointer;transition:all .15s;}
+.btn-teal{background:var(--teal);color:#000;} .btn-teal:hover{background:var(--teal2);}
+.btn-teal:disabled{background:var(--bg4);color:var(--text3);cursor:not-allowed;}
+.btn-red{background:var(--red);color:#fff;} .btn-red:hover{background:#c92b2b;}
+.btn-outline{background:transparent;border:1px solid var(--border2);color:var(--text2);}
+.btn-outline:hover{border-color:var(--teal);color:var(--teal);}
+.btn-blue{background:var(--blue);color:#fff;} .btn-blue:hover{background:#2478e0;}
+.btn-ghost{background:transparent;border:none;color:var(--text3);padding:4px 6px;}
+.btn-ghost:hover{color:var(--text);}
+
+/* ─ Stats ─ */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:18px;}
+.sc2{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);padding:14px 16px;}
+.sc2-label{font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text2);margin-bottom:5px;}
+.sc2-val{font-size:24px;font-weight:700;}
+.sc2-sub{font-size:11px;color:var(--text3);margin-top:2px;}
+
+/* ─ Panels ─ */
+.panel{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:14px;}
+.ph{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
+.pt{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text2);}
+.pb{padding:14px 16px;}
+.ptoggle{background:transparent;border:none;color:var(--text2);margin-left:auto;font-size:16px;}
+.ptoggle:hover{color:var(--text);}
+.pcollapse{overflow:hidden;transition:max-height .25s ease;}
+
+/* ─ Forms ─ */
+.fg{display:flex;flex-direction:column;gap:4px;}
+.fg label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text2);}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:9px;}
+
+/* ─ Enrichment ─ */
+.enrich-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;}
+.pbar-wrap{background:var(--bg4);border-radius:4px;height:5px;margin-top:10px;overflow:hidden;}
+.pbar{height:100%;background:linear-gradient(90deg,var(--teal),var(--blue));border-radius:4px;transition:width .3s;width:0%;}
+.pbar-label{font-size:11px;color:var(--text2);margin-top:4px;display:flex;justify-content:space-between;}
+.logbox{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;height:150px;overflow-y:auto;font-family:'Fira Code','Cascadia Code','Consolas',monospace;font-size:11px;margin-top:10px;}
+.ll{padding:1px 0;}
+.ll.success{color:var(--green);} .ll.warn{color:var(--yellow);} .ll.error{color:var(--red);} .ll.info{color:var(--text2);}
+
+/* ─ Filters ─ */
+.search-bar{width:100%;padding:9px 14px;font-size:14px;border-radius:var(--r);margin-bottom:10px;}
+.af-badge{display:none;background:var(--teal);color:#000;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;}
+
+/* ─ Table ─ */
+.tw{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:12px;}
+thead th{background:var(--bg3);color:var(--text2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.8px;padding:9px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none;}
+thead th:hover{color:var(--text);}
+thead th.sorted .si{color:var(--teal);opacity:1;}
+.si{margin-left:3px;opacity:.35;font-size:10px;}
+tbody tr{border-bottom:1px solid var(--border);transition:background var(--tr);}
+tbody tr:hover{background:var(--bg3);cursor:pointer;}
+tbody td{padding:8px 10px;vertical-align:middle;}
+.nm{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;}
+.ns{font-size:10px;color:var(--text3);}
+.sbadge{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:20px;padding:2px 9px;font-weight:700;font-size:12px;min-width:48px;}
+.s19{border-color:var(--teal);color:var(--teal);background:rgba(0,191,165,.08);}
+.s18{border-color:var(--green);color:var(--green);}
+.s17{border-color:var(--blue);color:var(--blue);}
+.s16{border-color:var(--yellow);color:var(--yellow);}
+.s15{border-color:var(--orange);color:var(--orange);}
+.snone{color:var(--text3);}
+.spill{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;}
+.spill.found{background:#0f4429;color:var(--green);border:1px solid #196032;}
+.spill.pending{background:#322916;color:var(--yellow);border:1px solid #5c4512;}
+.spill.not_found{background:#1e1e1e;color:var(--text3);border:1px solid var(--border);}
+.manual-badge{display:inline-block;background:rgba(188,140,255,.12);border:1px solid var(--purple);color:var(--purple);border-radius:10px;font-size:9px;font-weight:700;padding:1px 5px;margin-left:4px;}
+.lwin-chip{font-family:monospace;font-size:10px;color:var(--teal);cursor:pointer;background:rgba(0,191,165,.08);border:1px solid rgba(0,191,165,.2);padding:1px 5px;border-radius:4px;}
+.lwin-chip:hover{background:rgba(0,191,165,.18);}
+
+/* ─ Pagination ─ */
+.pag{display:flex;align-items:center;gap:6px;margin-top:12px;justify-content:flex-end;flex-wrap:wrap;}
+.pb2{background:var(--bg4);border:1px solid var(--border);color:var(--text2);padding:4px 11px;border-radius:var(--r);font-size:12px;}
+.pb2:hover{border-color:var(--teal);color:var(--teal);}
+.pb2:disabled{opacity:.3;cursor:not-allowed;}
+.pb2.cur{border-color:var(--teal);color:var(--teal);}
+
+/* ─ Modal ─ */
+.mov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);z-index:500;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;}
+.mov.active{display:flex;}
+.mod{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r2);width:780px;max-width:100%;padding:26px;position:relative;margin:auto;}
+.mod-close{position:absolute;top:12px;right:14px;background:transparent;border:none;color:var(--text2);font-size:20px;line-height:1;}
+.mod-close:hover{color:var(--text);}
+
+/* Reviews list */
+.rev-list{display:flex;flex-direction:column;gap:12px;margin-top:14px;}
+.rev-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:16px;position:relative;}
+.rev-card.best{border-color:var(--teal);background:rgba(0,191,165,.04);}
+.rev-best-badge{position:absolute;top:10px;right:10px;background:var(--teal);color:#000;font-size:9px;font-weight:800;padding:2px 7px;border-radius:10px;letter-spacing:.5px;}
+.rev-header{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap;}
+.rev-score{font-size:28px;font-weight:800;color:var(--teal);line-height:1;}
+.rev-score.low{color:var(--text2);}
+.rev-meta{flex:1;}
+.rev-reviewer{font-size:15px;font-weight:600;}
+.rev-date{font-size:11px;color:var(--text3);margin-top:2px;}
+.rev-source{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;padding:2px 7px;border-radius:10px;border:1px solid var(--border2);color:var(--text2);}
+.rev-note{font-size:13px;line-height:1.75;color:var(--text2);border-left:3px solid var(--teal);padding-left:12px;margin-top:8px;}
+.rev-footer{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap;}
+.rev-drink{font-size:11px;color:var(--text3);}
+
+/* ─ Add Wine Panel ─ */
+.add-wine-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.add-wine-form .span2{grid-column:1/-1;}
+.add-status{padding:10px 14px;border-radius:var(--r);font-size:13px;margin-top:10px;display:none;}
+.add-status.ok{background:#0f2a1e;border:1px solid var(--green);color:var(--green);}
+.add-status.err{background:#2a1010;border:1px solid var(--red);color:var(--red);}
+.add-status.loading{background:var(--bg4);border:1px solid var(--border2);color:var(--text2);}
+
+/* ─ Source cards ─ */
+.src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;}
+.src-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:16px;}
+.src-card.enabled{border-color:var(--teal);}
+.src-card.disabled{opacity:.5;}
+.src-icon{font-size:24px;margin-bottom:6px;}
+.src-name{font-weight:700;font-size:14px;}
+.src-url{font-size:11px;color:var(--text3);margin-top:2px;}
+.src-status{margin-top:8px;font-size:11px;font-weight:700;letter-spacing:.5px;}
+.src-status.on{color:var(--green);}
+.src-status.off{color:var(--text3);}
+
+/* ─ Drop zone ─ */
+.dz{border:2px dashed var(--border2);border-radius:var(--r2);padding:28px;text-align:center;color:var(--text2);cursor:pointer;transition:all .18s;}
+.dz:hover,.dz.drag{border-color:var(--teal);color:var(--teal);background:rgba(0,191,165,.04);}
+.dz input{display:none;}
+
+/* ─ Tabs ─ */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:14px;}
+.tab{background:transparent;border:none;color:var(--text2);padding:8px 14px;font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer;}
+.tab.active{color:var(--teal);border-bottom-color:var(--teal);}
+.tab-pane{display:none;} .tab-pane.active{display:block;}
+
+/* ─ Toast ─ */
+#tc{position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:7px;}
+.toast{background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);padding:9px 14px;font-size:12px;min-width:220px;animation:si .25s ease;}
+.toast.success{border-color:var(--green);color:var(--green);}
+.toast.error{border-color:var(--red);color:var(--red);}
+.toast.info{border-color:var(--blue);color:var(--blue);}
+@keyframes si{from{transform:translateX(16px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* ─ Cookie status ─ */
+.cstatus{display:flex;align-items:center;gap:8px;font-size:12px;padding:8px 12px;border-radius:var(--r);border:1px solid var(--border);}
+.cstatus.ok{background:#0f2a1e;border-color:var(--green);color:var(--green);}
+.cstatus.warn{background:#2a2010;border-color:var(--yellow);color:var(--yellow);}
+.empty-state{text-align:center;padding:48px 20px;color:var(--text3);}
+.empty-state .ei{font-size:40px;margin-bottom:10px;}
+input[type=range]{-webkit-appearance:none;height:4px;background:var(--bg4);border-radius:2px;outline:none;border:none;padding:0;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;background:var(--teal);border-radius:50%;}
+.rv{min-width:34px;text-align:right;color:var(--teal);font-weight:700;font-size:13px;}
+@media(max-width:600px){main{padding:10px;}.add-wine-form{grid-template-columns:1fr;}.mod{padding:16px;}}
+</style>
+</head>
+<body>
+
+<!-- Signin -->
+<div id="signin-screen" class="active">
+  <div class="sc">
+    <div class="sc-logo">MAAIKE</div>
+    <div class="sc-sub">WINE REVIEW INTELLIGENCE</div>
+    <input type="password" id="sk" placeholder="Enter API key…" autocomplete="current-password"/>
+    <button onclick="doSignin()">Sign In</button>
+    <div class="sc-err" id="se"></div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <header>
+    <div class="logo">MAAIKE <span>WINE INTELLIGENCE</span></div>
+    <nav>
+      <button class="nb active" onclick="showPage('dashboard',this)">Dashboard</button>
+      <button class="nb" onclick="showPage('wines',this)">Wine List</button>
+      <button class="nb" onclick="showPage('addwine',this)">+ Add Wine</button>
+      <button class="nb" onclick="showPage('upload',this)">Upload CSV</button>
+      <button class="nb" onclick="showPage('sources',this)">Sources</button>
+      <button class="nb" onclick="showPage('settings',this)">Settings</button>
+    </nav>
+    <div class="hs">
+      <div class="dot" id="wdot"></div>
+      <span id="wlabel">Connecting…</span>
+      <button class="btn btn-outline" style="margin-left:6px;padding:4px 9px;font-size:11px;" onclick="signout()">Sign Out</button>
+    </div>
+  </header>
+  <main>
+
+    <!-- ══ DASHBOARD ══ -->
+    <div id="page-dashboard" class="page active">
+      <div class="stats-grid" id="stats-grid">
+        <div class="sc2"><div class="sc2-label">Total Wines</div><div class="sc2-val" id="s-total">—</div></div>
+        <div class="sc2"><div class="sc2-label">Reviews Found</div><div class="sc2-val" style="color:var(--green)" id="s-found">—</div></div>
+        <div class="sc2"><div class="sc2-label">Pending</div><div class="sc2-val" style="color:var(--yellow)" id="s-pending">—</div></div>
+        <div class="sc2"><div class="sc2-label">Not Found</div><div class="sc2-val" style="color:var(--text2)" id="s-nf">—</div></div>
+        <div class="sc2"><div class="sc2-label">Coverage</div><div class="sc2-val" style="color:var(--teal)" id="s-cov">—</div><div class="sc2-sub">of total wines</div></div>
+        <div class="sc2"><div class="sc2-label">Avg Score /20</div><div class="sc2-val" style="color:var(--blue)" id="s-avg">—</div></div>
+        <div class="sc2"><div class="sc2-label">Total Reviews</div><div class="sc2-val" style="color:var(--purple)" id="s-revs">—</div><div class="sc2-sub">across all sources</div></div>
+        <div class="sc2"><div class="sc2-label">With LWIN</div><div class="sc2-val" style="color:var(--orange)" id="s-lwin">—</div></div>
+      </div>
+
+      <!-- Enrichment panel -->
+      <div class="panel">
+        <div class="ph">
+          <span style="font-size:15px;">⚡</span>
+          <span class="pt">Jancis Enrichment</span>
+          <div id="erb" style="display:none;margin-left:8px;display:none;align-items:center;gap:6px;">
+            <div class="dot pulse" style="background:var(--teal);display:inline-block;"></div>
+            <span style="font-size:12px;color:var(--teal);">Running…</span>
+          </div>
+          <button class="ptoggle" onclick="togglePanel('ep-body','ep-tog')" id="ep-tog">▾</button>
+        </div>
+        <div class="pcollapse" id="ep-body">
+          <div class="pb">
+            <div class="enrich-row">
+              <div class="fg"><label>Limit (0=all)</label><input type="number" id="el" value="50" min="0" style="width:90px;"/></div>
+              <div class="fg" style="flex:1;max-width:200px;"><label>Sleep between requests</label>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="range" id="es" min="0.3" max="5" step="0.1" value="1.2" style="flex:1;" oninput="document.getElementById('esv').textContent=parseFloat(this.value).toFixed(1)+'s'"/>
+                  <span class="rv" id="esv">1.2s</span>
+                </div>
+              </div>
+              <div class="fg"><label>Scope</label>
+                <select id="esc2" style="width:160px;">
+                  <option value="pending">Pending only</option>
+                  <option value="all">Pending + Not found</option>
+                </select>
+              </div>
+              <div class="fg" style="justify-content:flex-end;">
+                <label>&nbsp;</label>
+                <div style="display:flex;gap:7px;">
+                  <button class="btn btn-teal" id="estart" onclick="startEnrich()">▶ Run Enrichment</button>
+                  <button class="btn btn-red" id="estop" style="display:none;" onclick="stopEnrich()">⏹ Stop</button>
+                </div>
+              </div>
+            </div>
+            <div class="pbar-wrap"><div class="pbar" id="epbar"></div></div>
+            <div class="pbar-label"><span id="epct">0%</span><span id="ecnt">—</span></div>
+            <div class="logbox" id="elog"></div>
+            <div style="display:flex;justify-content:flex-end;margin-top:7px;">
+              <button class="btn btn-outline" onclick="document.getElementById('elog').innerHTML=''">Clear Log</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom stats -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div class="panel">
+          <div class="ph"><span class="pt">🏆 Top Reviewers</span></div>
+          <div class="pb" id="rev-list2"><div style="color:var(--text3);font-size:12px;">Loading…</div></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><span class="pt">📊 Score Distribution</span></div>
+          <div class="pb" id="sdist"><div style="color:var(--text3);font-size:12px;">Loading…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ WINE LIST ══ -->
+    <div id="page-wines" class="page">
+      <!-- Filters -->
+      <div class="panel" style="margin-bottom:10px;">
+        <div class="ph">
+          <span class="pt">🔍 Filters</span>
+          <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+            <span class="af-badge" id="afb"></span>
+            <button class="btn btn-outline" style="font-size:10px;padding:3px 9px;" onclick="resetFilters()">Reset</button>
+            <button class="ptoggle" onclick="togglePanel('fp-body','fp-tog')" id="fp-tog">▾</button>
+          </div>
+        </div>
+        <div class="pcollapse" id="fp-body">
+          <div class="pb">
+            <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:10px;">
+              <input type="text" id="f-search" class="search-bar" style="margin-bottom:0;" placeholder="Search wine name, region, reviewer…" oninput="debounceLoad()"/>
+              <div class="fg">
+                <label>🔑 LWIN Search</label>
+                <input type="text" id="f-lwin" style="width:190px;" placeholder="e.g. 1994896" oninput="debounceLoad()"/>
+              </div>
+            </div>
+            <div class="fgrid" style="margin-bottom:10px;">
+              <div class="fg"><label>Status</label>
+                <select id="f-status" onchange="loadWines()">
+                  <option value="">All statuses</option>
+                  <option value="found">✓ Found</option>
+                  <option value="pending">⏳ Pending</option>
+                  <option value="not_found">✗ Not Found</option>
+                </select>
+              </div>
+              <div class="fg"><label>Vintage</label><select id="f-vintage" onchange="loadWines()"><option value="">All vintages</option></select></div>
+              <div class="fg"><label>Colour</label><select id="f-colour" onchange="loadWines()"><option value="">All colours</option></select></div>
+              <div class="fg"><label>Region</label><input type="text" id="f-region" placeholder="e.g. Burgundy" oninput="debounceLoad()"/></div>
+              <div class="fg"><label>Reviewer</label><select id="f-reviewer" onchange="loadWines()"><option value="">All reviewers</option></select></div>
+              <div class="fg"><label>Source</label><select id="f-source" onchange="loadWines()"><option value="">All sources</option></select></div>
+              <div class="fg"><label>Min Score /20</label><input type="number" id="f-min-score" step="0.5" min="0" max="20" placeholder="0" oninput="debounceLoad()"/></div>
+              <div class="fg"><label>Max Score /20</label><input type="number" id="f-max-score" step="0.5" min="0" max="20" placeholder="20" oninput="debounceLoad()"/></div>
+              <div class="fg"><label>Has Tasting Note</label>
+                <select id="f-has-note" onchange="loadWines()">
+                  <option value="">All wines</option><option value="1">With note only</option>
+                </select>
+              </div>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:9px;">
+              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:7px;">▸ Advanced</div>
+              <div class="fgrid">
+                <div class="fg"><label>Min Review Count</label><input type="number" id="f-min-reviews" min="0" placeholder="e.g. 2" oninput="debounceLoad()"/></div>
+                <div class="fg"><label>Min Note Length (chars)</label><input type="number" id="f-min-note-len" min="0" step="50" placeholder="e.g. 200" oninput="debounceLoad()"/></div>
+                <div class="fg"><label>📅 Review Date From</label><input type="date" id="f-date-from" oninput="debounceLoad()"/></div>
+                <div class="fg"><label>📅 Review Date To</label><input type="date" id="f-date-to" oninput="debounceLoad()"/></div>
+                <div class="fg"><label>Review Year</label>
+                  <select id="f-review-year" onchange="loadWines()"><option value="">Any year</option></select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;flex-wrap:wrap;">
+        <span id="tc2" style="color:var(--text2);font-size:12px;">Loading…</span>
+        <div style="margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;">
+          <select id="pps" onchange="loadWines()" style="width:85px;">
+            <option value="25">25/page</option><option value="50" selected>50/page</option><option value="100">100/page</option>
+          </select>
+          <button class="btn btn-outline" onclick="downloadCSV()">⬇ Export All</button>
+          <button class="btn btn-teal" onclick="downloadCSV('found')">⬇ Found Only</button>
+        </div>
+      </div>
+
+      <div class="panel" style="padding:0;overflow:hidden;">
+        <div class="tw">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="setSort('name')" data-sort="name">Wine Name <span class="si">↕</span></th>
+                <th onclick="setSort('vintage')" data-sort="vintage">Vintage <span class="si">↕</span></th>
+                <th onclick="setSort('lwin7')" data-sort="lwin7">LWIN7 <span class="si">↕</span></th>
+                <th onclick="setSort('maaike_score_20')" data-sort="maaike_score_20" class="sorted">Score /20 <span class="si">↓</span></th>
+                <th onclick="setSort('maaike_review_count')" data-sort="maaike_review_count">Reviews <span class="si">↕</span></th>
+                <th>Reviewer</th>
+                <th onclick="setSort('maaike_date_tasted')" data-sort="maaike_date_tasted">Review Date <span class="si">↕</span></th>
+                <th onclick="setSort('maaike_note_length')" data-sort="maaike_note_length">Note <span class="si">↕</span></th>
+                <th>Region</th>
+                <th onclick="setSort('price_eur')" data-sort="price_eur">Price EUR <span class="si">↕</span></th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="wtbody"><tr><td colspan="11" class="empty-state">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="pag" id="pagination"></div>
+    </div>
+
+    <!-- ══ ADD SINGLE WINE ══ -->
+    <div id="page-addwine" class="page">
+      <div style="max-width:640px;">
+        <div class="panel">
+          <div class="ph"><span style="font-size:16px;">🍾</span><span class="pt">Add Single Wine & Search Reviews</span></div>
+          <div class="pb">
+            <p style="color:var(--text2);font-size:13px;margin-bottom:16px;">
+              Add a wine manually and instantly search for its review on all enabled sources.
+              The LWIN code greatly improves match accuracy.
+            </p>
+            <div class="add-wine-form" id="awf">
+              <div class="fg span2">
+                <label>Wine Name *</label>
+                <input type="text" id="aw-name" placeholder="e.g. Giuseppe Rinaldi, Barolo, Brunate" style="font-size:14px;padding:9px 12px;"/>
+              </div>
+              <div class="fg">
+                <label>Vintage</label>
+                <input type="number" id="aw-vintage" placeholder="e.g. 2021" min="1900" max="2030" style="width:100%;"/>
+              </div>
+              <div class="fg">
+                <label>LWIN (full, recommended)</label>
+                <input type="text" id="aw-lwin" placeholder="e.g. LWIN110419020211200750"/>
+              </div>
+              <div class="fg">
+                <label>Price EUR</label>
+                <input type="text" id="aw-price" placeholder="e.g. €320.00"/>
+              </div>
+              <div class="fg">
+                <label>Region / Appellation</label>
+                <input type="text" id="aw-region" placeholder="e.g. Barolo, Piedmont"/>
+              </div>
+              <div class="fg">
+                <label>Colour</label>
+                <select id="aw-colour" style="width:100%;">
+                  <option value="">Unknown</option>
+                  <option value="Red">Red</option><option value="White">White</option>
+                  <option value="Rosé">Rosé</option><option value="Sparkling">Sparkling</option>
+                  <option value="Dessert">Dessert</option><option value="Fortified">Fortified</option>
+                </select>
+              </div>
+              <div class="fg">
+                <label>Country</label>
+                <input type="text" id="aw-country" placeholder="e.g. Italy"/>
+              </div>
+              <div class="fg span2" style="flex-direction:row;align-items:center;gap:10px;padding-top:6px;">
+                <input type="checkbox" id="aw-auto" checked style="width:auto;padding:0;"/>
+                <label style="font-size:12px;text-transform:none;letter-spacing:0;color:var(--text2);cursor:pointer;" for="aw-auto">
+                  Auto-search reviews immediately after adding
+                </label>
+              </div>
+              <div class="fg span2">
+                <button class="btn btn-teal" style="width:100%;padding:11px;font-size:14px;" onclick="addWine()">
+                  🔍 Add Wine & Search Reviews
+                </button>
+              </div>
+            </div>
+            <div class="add-status" id="aw-status"></div>
+
+            <!-- Result preview -->
+            <div id="aw-result" style="display:none;margin-top:16px;"></div>
+          </div>
+        </div>
+
+        <!-- Recent manually added wines -->
+        <div class="panel">
+          <div class="ph"><span class="pt">🕐 Recently Added Manually</span>
+            <button class="btn btn-outline" style="margin-left:auto;font-size:10px;padding:3px 8px;" onclick="loadManualWines()">Refresh</button>
+          </div>
+          <div class="pb" id="manual-wines-list"><div style="color:var(--text3);font-size:12px;">Loading…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ UPLOAD CSV ══ -->
+    <div id="page-upload" class="page">
+      <div class="panel" style="max-width:580px;">
+        <div class="ph"><span class="pt">📁 Upload Rue Pinard CSV</span></div>
+        <div class="pb">
+          <p style="color:var(--text2);font-size:13px;margin-bottom:14px;">
+            Upload your Rue Pinard export. Columns auto-detected. LWIN is read automatically.
+            Columns: <code style="color:var(--teal);">name, lwin, vintage, unit-size, price, url, stock-level</code>
+          </p>
+          <div class="dz" id="dz" onclick="document.getElementById('csvf').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)">
+            <input type="file" id="csvf" accept=".csv" onchange="handleFile(this.files[0])"/>
+            <div style="font-size:28px;margin-bottom:8px;">📄</div>
+            <div>Click or drag a <strong>.csv</strong> file here</div>
+            <div style="font-size:11px;margin-top:5px;color:var(--text3);">Max 20MB</div>
+          </div>
+          <div id="ur" style="display:none;margin-top:14px;padding:14px;border-radius:var(--r);background:var(--bg4);border:1px solid var(--border2);"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SOURCES ══ -->
+    <div id="page-sources" class="page">
+      <div class="panel" style="max-width:900px;">
+        <div class="ph"><span class="pt">🌐 Review Sources</span></div>
+        <div class="pb">
+          <p style="color:var(--text2);font-size:13px;margin-bottom:16px;">
+            MAAIKE supports multiple review sources. Currently only JancisRobinson is active.
+            More sources can be added by updating <code style="color:var(--teal);">SOURCES</code> in <code style="color:var(--teal);">api.py</code>.
+          </p>
+          <div class="src-grid" id="src-grid">
+            <div style="color:var(--text3);">Loading…</div>
+          </div>
+          <div style="margin-top:20px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:16px;">
+            <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;">How to Add a New Source</div>
+            <div style="font-size:12px;color:var(--text2);line-height:1.8;">
+              1. Open <code style="color:var(--teal);">backend/api.py</code> → find the <code style="color:var(--teal);">SOURCES</code> dict at the top<br>
+              2. Uncomment or add a new entry with <code style="color:var(--teal);">name, url, enabled, icon, color</code><br>
+              3. Create <code style="color:var(--teal);">backend/sources/your_source.py</code> with a <code style="color:var(--teal);">search_wine(session, name, vintage, lwin)</code> function<br>
+              4. Import it in <code style="color:var(--teal);">maaike_phase1.py</code> and add to the search chain<br>
+              5. Restart the server — the new source appears here automatically
+            </div>
+          </div>
+          <div style="margin-top:14px;">
+            <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">Reviews by Source</div>
+            <div id="src-stats" style="color:var(--text3);font-size:12px;">Loading…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SETTINGS ══ -->
+    <div id="page-settings" class="page">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:780px;">
+        <div class="panel">
+          <div class="ph"><span class="pt">🍪 Cookie Status</span></div>
+          <div class="pb" id="cstatus-body"><div style="color:var(--text3);">Loading…</div></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><span class="pt">🔄 Update Cookies</span></div>
+          <div class="pb">
+            <p style="color:var(--text2);font-size:12px;margin-bottom:10px;">Upload a fresh real_cookies.json exported from your browser.</p>
+            <div class="dz" style="padding:18px;" onclick="document.getElementById('ckf').click()">
+              <input type="file" id="ckf" accept=".json" style="display:none;" onchange="uploadCookies(this.files[0])"/>
+              <div>📂 Click to upload real_cookies.json</div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph"><span class="pt">ℹ️ System Info</span></div>
+          <div class="pb" id="sysinfo"><div style="color:var(--text3);">Loading…</div></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><span class="pt">⚠️ Danger Zone</span></div>
+          <div class="pb" style="display:flex;flex-direction:column;gap:10px;">
+            <div>
+              <p style="color:var(--text2);font-size:12px;margin-bottom:8px;">Reset "not_found" wines back to pending for re-enrichment.</p>
+              <button class="btn" style="border:1px solid var(--yellow);color:var(--yellow);background:transparent;" onclick="resetNotFound()">Reset Not Found → Pending</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Wine Detail Modal -->
+<div class="mov" id="wmod" onclick="if(event.target===this)closeMod()">
+  <div class="mod">
+    <button class="mod-close" onclick="closeMod()">✕</button>
+    <div id="mod-content">Loading…</div>
+  </div>
+</div>
+
+<div id="tc"></div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let AK = localStorage.getItem('maaike_ak') || '';
+let curPage = 1, sortField = 'maaike_score_20', sortDir = 'desc';
+let debTimer, socket;
+const API = '/api';
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  AK ? verifyAndLoad() : showSignin();
+  document.getElementById('sk').addEventListener('keydown', e => { if(e.key==='Enter') doSignin(); });
+});
+
+// ─── Signin ───────────────────────────────────────────────────────────────────
+function showSignin() {
+  document.getElementById('signin-screen').classList.add('active');
+  document.getElementById('app').classList.remove('active');
+  setTimeout(() => document.getElementById('sk').focus(), 80);
+}
+function showApp() {
+  document.getElementById('signin-screen').classList.remove('active');
+  document.getElementById('app').classList.add('active');
+}
+async function doSignin() {
+  const btn = document.querySelector('#signin-screen button');
+  const key = document.getElementById('sk').value.trim();
+  const err = document.getElementById('se');
+  err.textContent = '';
+  if (!key) { err.textContent = 'Enter API key.'; return; }
+  btn.textContent = 'Signing in…'; btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/auth`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:key})});
+    const d = await r.json();
+    if (d.ok) {
+      AK = key; localStorage.setItem('maaike_ak', key);
+      showApp(); initApp();
+    } else { err.textContent = 'Invalid API key.'; }
+  } catch(e) { err.textContent = 'Connection error: ' + e.message; }
+  btn.textContent = 'Sign In'; btn.disabled = false;
+}
+async function verifyAndLoad() {
+  try {
+    const r = await fetch(`${API}/stats`, {headers:{'X-API-Key':AK}});
+    if (r.status === 401) { showSignin(); return; }
+    showApp(); initApp();
+  } catch { showSignin(); }
+}
+function signout() {
+  localStorage.removeItem('maaike_ak'); AK = '';
+  if(socket) socket.disconnect();
+  showSignin();
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+function initApp() {
+  initSocket();
+  loadStats();
+  loadFilterOptions();
+  loadWines();
+  loadCookieStatus();
+  loadSysInfo();
+  loadManualWines();
+  loadSources();
+}
+
+// ─── Socket ───────────────────────────────────────────────────────────────────
+function initSocket() {
+  const dot = document.getElementById('wdot'), lbl = document.getElementById('wlabel');
+  if (typeof io === 'undefined') { dot.className='dot warn'; lbl.textContent='No live log'; return; }
+  try {
+    socket = io({transports:['websocket','polling'],reconnectionAttempts:5});
+    socket.on('connect',      ()  => { dot.className='dot'; lbl.textContent='Live'; });
+    socket.on('disconnect',   ()  => { dot.className='dot err'; lbl.textContent='Disconnected'; });
+    socket.on('connect_error',()  => { dot.className='dot warn'; lbl.textContent='Reconnecting…'; });
+    socket.on('enrich_log',      d => appendLog(d.msg, d.level));
+    socket.on('enrich_progress', d => updateProgress(d));
+    socket.on('wine_enriched',   d => onWineEnriched(d));
+  } catch(e) { dot.className='dot warn'; lbl.textContent='No live log'; }
+}
+
+function onWineEnriched(d) {
+  if (d.found) toast(`Wine ID ${d.wine_id}: ${d.count} review(s) found (${d.score}/20)`, 'success');
+  else if (d.error) toast(`Error enriching wine: ${d.error}`, 'error');
+  else toast(`Wine ID ${d.wine_id}: not found on JancisRobinson`, 'info');
+  loadStats();
+  // Refresh add wine result if visible
+  if (document.getElementById('aw-result').style.display !== 'none' && d.wine_id) {
+    setTimeout(() => showRecentlyAdded(d.wine_id), 500);
+  }
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const d = await ap('/stats');
+    document.getElementById('s-total').textContent   = d.total.toLocaleString();
+    document.getElementById('s-found').textContent   = d.found.toLocaleString();
+    document.getElementById('s-pending').textContent = d.pending.toLocaleString();
+    document.getElementById('s-nf').textContent      = d.not_found.toLocaleString();
+    document.getElementById('s-cov').textContent     = d.coverage + '%';
+    document.getElementById('s-avg').textContent     = d.avg_score ? d.avg_score.toFixed(2) : '—';
+    document.getElementById('s-revs').textContent    = (d.total_reviews||0).toLocaleString();
+    document.getElementById('s-lwin').textContent    = (d.with_lwin||0).toLocaleString();
+
+    const rl = document.getElementById('rev-list2');
+    rl.innerHTML = d.reviewers?.length
+      ? d.reviewers.map(r => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);">
+          <span>${esc(r.name)}</span><span style="color:var(--teal);font-weight:700;">${r.count}</span></div>`).join('')
+      : '<div style="color:var(--text3);">No data yet</div>';
+
+    const sd = document.getElementById('sdist');
+    if (d.score_dist?.length) {
+      const mx = Math.max(...d.score_dist.map(x=>x.count));
+      sd.innerHTML = d.score_dist.map(x => {
+        const p = mx ? Math.round(x.count/mx*100) : 0;
+        return `<div style="margin-bottom:7px;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
+            <span style="font-size:12px;">${x.band}</span><span style="font-size:12px;color:var(--text2);">${x.count}</span>
+          </div>
+          <div style="background:var(--bg4);border-radius:3px;height:4px;">
+            <div style="width:${p}%;height:100%;background:var(--teal);border-radius:3px;"></div>
+          </div></div>`;
+      }).join('');
+    } else sd.innerHTML = '<div style="color:var(--text3);">No scored wines yet</div>';
+
+    if (d.enrichment_running) setEnrichRunning(true);
+  } catch(e) { console.error(e); }
+}
+
+// ─── Filter Options ───────────────────────────────────────────────────────────
+async function loadFilterOptions() {
+  try {
+    const d = await ap('/filter-options');
+    fillSel('f-vintage',     d.vintages,  v=>v);
+    fillSel('f-colour',      d.colours,   v=>v);
+    fillSel('f-reviewer',    d.reviewers, v=>v);
+    fillSel('f-source',      d.sources,   v=>v);
+    const yr = new Date().getFullYear();
+    fillSel('f-review-year', Array.from({length:yr-1999},(_,i)=>yr-i), v=>v);
+  } catch {}
+}
+function fillSel(id, items, fn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const first = el.options[0].outerHTML;
+  el.innerHTML = first + items.map(v => `<option value="${esc(fn(v))}">${esc(fn(v))}</option>`).join('');
+}
+
+// ─── Wine Table ───────────────────────────────────────────────────────────────
+async function loadWines() {
+  const p = new URLSearchParams({
+    page: curPage, per_page: document.getElementById('pps').value,
+    search: document.getElementById('f-search').value,
+    status: document.getElementById('f-status').value,
+    vintage: document.getElementById('f-vintage').value,
+    colour: document.getElementById('f-colour').value,
+    region: document.getElementById('f-region').value,
+    reviewer: document.getElementById('f-reviewer').value,
+    source: document.getElementById('f-source').value,
+    min_score: document.getElementById('f-min-score').value,
+    max_score: document.getElementById('f-max-score').value,
+    lwin: document.getElementById('f-lwin').value,
+    has_note: document.getElementById('f-has-note').value,
+    min_reviews: document.getElementById('f-min-reviews').value,
+    min_note_len: document.getElementById('f-min-note-len').value,
+    date_from: document.getElementById('f-date-from').value,
+    date_to: document.getElementById('f-date-to').value,
+    review_year: document.getElementById('f-review-year').value,
+    sort: sortField, dir: sortDir,
+  });
+  const fids = ['f-search','f-status','f-vintage','f-colour','f-region','f-reviewer',
+    'f-source','f-min-score','f-max-score','f-lwin','f-has-note','f-min-reviews',
+    'f-min-note-len','f-date-from','f-date-to','f-review-year'];
+  const ac = fids.filter(i => document.getElementById(i)?.value).length;
+  const badge = document.getElementById('afb');
+  badge.textContent = ac ? ac+' active' : ''; badge.style.display = ac ? 'inline' : 'none';
+
+  try {
+    const d = await ap(`/wines?${p}`);
+    renderTable(d.wines);
+    renderPag(d.page, d.pages, d.total);
+    document.getElementById('tc2').textContent = `${d.total.toLocaleString()} wine${d.total!==1?'s':''} found`;
+  } catch(e) {
+    document.getElementById('wtbody').innerHTML = `<tr><td colspan="11" style="color:var(--red);padding:20px;text-align:center;">${esc(e.message)}</td></tr>`;
+  }
+}
+
+function renderTable(wines) {
+  const tbody = document.getElementById('wtbody');
+  if (!wines.length) {
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><div class="ei">🍷</div><div>No wines match your filters</div></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = wines.map(w => {
+    const s = w.maaike_score_20;
+    const sb = s ? `<span class="sbadge ${scls(s)}">${s.toFixed(1)}</span>` : `<span class="sbadge snone">—</span>`;
+    const lw = w.lwin7
+      ? `<span class="lwin-chip" onclick="event.stopPropagation();document.getElementById('f-lwin').value='${esc(w.lwin7)}';loadWines();" title="Click to filter by LWIN7">${esc(w.lwin7)}</span>`
+      : '<span style="color:var(--text3)">—</span>';
+    const rc = w.maaike_review_count || 0;
+    const rcb = rc > 0
+      ? `<span style="background:${rc>=3?'var(--teal3)':'var(--bg4)'};border:1px solid ${rc>=3?'var(--teal)':'var(--border)'};color:${rc>=3?'var(--teal)':'var(--text2)'};border-radius:20px;padding:1px 8px;font-size:10px;font-weight:700;">${rc}</span>`
+      : '<span style="color:var(--text3)">—</span>';
+    const nl = w.maaike_note_length || 0;
+    const nb2 = nl > 0
+      ? `<div style="display:flex;align-items:center;gap:4px;" title="${nl} chars">
+           <div style="width:36px;height:3px;background:var(--bg4);border-radius:2px;">
+             <div style="width:${Math.min(100,Math.round(nl/600*100))}%;height:100%;background:${nl>400?'var(--teal)':nl>200?'var(--blue)':'var(--text3)'};border-radius:2px;"></div>
+           </div><span style="font-size:10px;color:var(--text3);">${nl}</span></div>`
+      : '<span style="color:var(--text3)">—</span>';
+    const st = `<span class="spill ${w.enrichment_status}">${w.enrichment_status}</span>`;
+    const manb = w.added_manually ? '<span class="manual-badge">MANUAL</span>' : '';
+    const dt = w.maaike_date_tasted
+      ? `<span style="font-size:11px;color:var(--text2);">${esc(w.maaike_date_tasted)}</span>`
+      : '<span style="color:var(--text3)">—</span>';
+    return `<tr onclick="showDetail(${w.id})">
+      <td><div class="nm" title="${esc(w.name)}">${esc(w.name)}${manb}</div><div class="ns">${esc(w.region||w.appellation||'')}</div></td>
+      <td>${esc(w.vintage||'NV')}</td>
+      <td>${lw}</td>
+      <td>${sb}</td>
+      <td>${rcb}</td>
+      <td style="color:var(--text2);white-space:nowrap;">${esc(w.maaike_reviewer||'—')}</td>
+      <td>${dt}</td>
+      <td>${nb2}</td>
+      <td style="color:var(--text2);font-size:11px;">${esc(w.region||w.appellation||'—')}</td>
+      <td style="font-size:11px;white-space:nowrap;">${esc(w.price_eur||'—')}</td>
+      <td>${st}</td>
+    </tr>`;
+  }).join('');
+}
+
+function scls(s) {
+  if(s>=19)return 's19'; if(s>=18)return 's18'; if(s>=17)return 's17'; if(s>=16)return 's16'; if(s>=15)return 's15'; return '';
+}
+
+function renderPag(page, pages, total) {
+  const el = document.getElementById('pagination');
+  if (pages <= 1) { el.innerHTML=''; return; }
+  let h = `<button class="pb2" onclick="goPage(${page-1})" ${page<=1?'disabled':''}>‹</button>`;
+  const d=2, s=Math.max(1,page-d), e=Math.min(pages,page+d);
+  if(s>1) h+=`<button class="pb2" onclick="goPage(1)">1</button>${s>2?'<span style="color:var(--text3);padding:0 3px;">…</span>':''}`;
+  for(let i=s;i<=e;i++) h+=`<button class="pb2 ${i===page?'cur':''}" onclick="goPage(${i})">${i}</button>`;
+  if(e<pages) h+=`${e<pages-1?'<span style="color:var(--text3);padding:0 3px;">…</span>':''}<button class="pb2" onclick="goPage(${pages})">${pages}</button>`;
+  h+=`<button class="pb2" onclick="goPage(${page+1})" ${page>=pages?'disabled':''}>›</button>`;
+  h+=`<span style="color:var(--text2);font-size:11px;margin-left:4px;">Page ${page}/${pages} · ${total.toLocaleString()} wines</span>`;
+  el.innerHTML = h;
+}
+
+function goPage(p) { curPage=p; loadWines(); }
+function setSort(f) {
+  if(sortField===f) sortDir = sortDir==='desc'?'asc':'desc';
+  else { sortField=f; sortDir='desc'; }
+  document.querySelectorAll('thead th').forEach(th => { th.classList.remove('sorted'); th.querySelector('.si').textContent='↕'; });
+  const th = document.querySelector(`thead th[data-sort="${f}"]`);
+  if(th) { th.classList.add('sorted'); th.querySelector('.si').textContent=sortDir==='desc'?'↓':'↑'; }
+  curPage=1; loadWines();
+}
+function debounceLoad() { clearTimeout(debTimer); debTimer=setTimeout(()=>{curPage=1;loadWines();},320); }
+function resetFilters() {
+  ['f-search','f-region','f-min-score','f-max-score','f-lwin','f-min-reviews','f-min-note-len','f-date-from','f-date-to']
+    .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['f-status','f-vintage','f-colour','f-reviewer','f-source','f-has-note','f-review-year']
+    .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  curPage=1; loadWines();
+}
+
+// ─── Wine Detail Modal (with ALL reviews) ─────────────────────────────────────
+async function showDetail(id) {
+  const ov = document.getElementById('wmod');
+  ov.classList.add('active');
+  document.getElementById('mod-content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2);">Loading…</div>';
+  try {
+    const [w, rv] = await Promise.all([ap(`/wines/${id}`), ap(`/wines/${id}/reviews`)]);
+    renderModal(w, rv.reviews);
+  } catch(e) {
+    document.getElementById('mod-content').innerHTML = `<div style="color:var(--red);">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderModal(w, reviews) {
+  const best   = reviews.find(r => r.score_20 === Math.max(...reviews.map(x=>x.score_20||0))) || reviews[0];
+  const score  = w.maaike_score_20;
+  const lwinHtml = w.lwin
+    ? `<span style="font-family:monospace;font-size:11px;background:var(--bg4);padding:2px 7px;border-radius:4px;color:var(--teal);">${esc(w.lwin)}</span>`
+    : '—';
+
+  let reviewsHtml = '';
+  if (reviews.length > 0) {
+    reviewsHtml = `
+      <div style="margin-top:20px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);">
+            All Reviews (${reviews.length})
+          </div>
+          <div style="font-size:11px;color:var(--text3);">Best score highlighted</div>
+        </div>
+        <div class="rev-list">
+          ${reviews.map((r,i) => {
+            const isBest = r.id === (best?.id);
+            const s = r.score_20;
+            const srcInfo = {'jancisrobinson':'Jancis Robinson','decanter':'Decanter','wine_spectator':'Wine Spectator'};
+            const srcName = srcInfo[r.source] || r.source;
+            return `
+              <div class="rev-card ${isBest?'best':''}">
+                ${isBest ? '<div class="rev-best-badge">★ BEST</div>' : ''}
+                <div class="rev-header">
+                  <div class="rev-score ${!s?'low':''}">${s ? s.toFixed(1) : '—'}<span style="font-size:14px;color:var(--text3)">/20</span></div>
+                  <div class="rev-meta">
+                    <div class="rev-reviewer">${esc(r.reviewer||'Unknown reviewer')}</div>
+                    <div class="rev-date">${esc(r.date_tasted||'Date unknown')}</div>
+                  </div>
+                  <span class="rev-source">${esc(srcName)}</span>
+                </div>
+                ${r.note ? `<div class="rev-note">${esc(r.note)}</div>` : '<div style="color:var(--text3);font-size:12px;font-style:italic;">No tasting note available</div>'}
+                <div class="rev-footer">
+                  ${r.drink_from && r.drink_to ? `<span class="rev-drink">🍷 Drink: ${r.drink_from}–${r.drink_to}</span>` : ''}
+                  ${r.review_url ? `<a href="${r.review_url}" target="_blank" class="btn btn-outline" style="font-size:11px;padding:3px 9px;" onclick="event.stopPropagation()">Open Review ↗</a>` : ''}
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  } else {
+    reviewsHtml = `
+      <div style="margin-top:16px;background:var(--bg3);border:1px dashed var(--border2);border-radius:var(--r2);padding:20px;text-align:center;color:var(--text3);">
+        <div style="font-size:24px;margin-bottom:8px;">🔍</div>
+        No reviews found yet.
+        <button class="btn btn-teal" style="margin-top:10px;display:block;margin-left:auto;margin-right:auto;" onclick="enrichSingle(${w.id})">
+          Search Reviews Now
+        </button>
+      </div>`;
+  }
+
+  document.getElementById('mod-content').innerHTML = `
+    <div style="font-size:20px;font-weight:700;margin-bottom:3px;">${esc(w.name)}</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:16px;">
+      ${esc(w.vintage||'NV')} &nbsp;·&nbsp; ${esc(w.region||w.appellation||'Region unknown')}
+      ${w.added_manually ? '<span class="manual-badge" style="vertical-align:middle;">MANUAL</span>' : ''}
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px;">
+      ${[
+        ['Colour', w.colour||w.maaike_colour||'—'],
+        ['LWIN', lwinHtml],
+        ['LWIN7', w.lwin7||'—'],
+        ['Price EUR', w.price_eur||'—'],
+        ['Stock', w.stock||'—'],
+        ['Unit Size', w.unit_size||'—'],
+      ].map(([l,v]) => `<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:3px;">${l}</div><div style="font-size:13px;">${v}</div></div>`).join('')}
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+      ${w.maaike_review_url ? `<a href="${w.maaike_review_url}" target="_blank" class="btn btn-teal" onclick="event.stopPropagation()">Open Best Review ↗</a>` : ''}
+      ${w.supplier_url ? `<a href="${w.supplier_url}" target="_blank" class="btn btn-outline" onclick="event.stopPropagation()">Rue Pinard ↗</a>` : ''}
+      <button class="btn btn-blue" onclick="enrichSingle(${w.id})">🔄 Re-search Reviews</button>
+      <button class="btn btn-outline" onclick="closeMod()">Close</button>
+    </div>
+
+    ${reviewsHtml}
+  `;
+}
+
+async function enrichSingle(wineId) {
+  try {
+    await ap(`/wines/${wineId}/enrich`, {method:'POST'});
+    toast('Searching reviews… (check dashboard log)', 'info');
+  } catch(e) { toast('Error: '+e.message, 'error'); }
+}
+
+function closeMod() { document.getElementById('wmod').classList.remove('active'); }
+
+// ─── Add Wine ─────────────────────────────────────────────────────────────────
+async function addWine() {
+  const name    = document.getElementById('aw-name').value.trim();
+  const vintage = document.getElementById('aw-vintage').value.trim();
+  const lwin    = document.getElementById('aw-lwin').value.trim();
+  const price   = document.getElementById('aw-price').value.trim();
+  const region  = document.getElementById('aw-region').value.trim();
+  const colour  = document.getElementById('aw-colour').value;
+  const country = document.getElementById('aw-country').value.trim();
+  const auto    = document.getElementById('aw-auto').checked;
+
+  if (!name) { toast('Wine name is required', 'error'); return; }
+
+  const stat = document.getElementById('aw-status');
+  stat.className = 'add-status loading'; stat.style.display = 'block';
+  stat.textContent = '⏳ Adding wine' + (auto ? ' and searching reviews…' : '…');
+
+  try {
+    const d = await ap('/wines/add', {
+      method:'POST',
+      body: JSON.stringify({name, vintage, lwin, price_eur:price, region, colour, country, auto_enrich:auto})
+    });
+
+    if (d.existed) {
+      stat.className = 'add-status loading';
+      stat.innerHTML = `ℹ️ Wine already exists (ID: ${d.wine_id}). <button class="btn btn-outline" style="font-size:11px;padding:2px 8px;margin-left:8px;" onclick="showDetail(${d.wine_id})">View</button>`;
+    } else {
+      stat.className = 'add-status ok';
+      stat.innerHTML = `✓ Added! Wine ID: ${d.wine_id}${auto ? ' — searching reviews in background…' : ''}`;
+      if (auto) {
+        stat.innerHTML += `<br><span style="font-size:11px;color:var(--text3);">Results will appear in this page and Wine List when done.</span>`;
+        // Poll for result
+        pollWineResult(d.wine_id);
+      }
+      // Clear form
+      ['aw-name','aw-vintage','aw-lwin','aw-price','aw-region','aw-country']
+        .forEach(id => { document.getElementById(id).value=''; });
+      document.getElementById('aw-colour').value = '';
+      loadStats();
+      loadManualWines();
+    }
+    toast(d.existed ? 'Wine already exists' : 'Wine added!', d.existed ? 'info' : 'success');
+  } catch(e) {
+    stat.className = 'add-status err'; stat.style.display = 'block';
+    stat.textContent = '✗ Error: ' + e.message;
+    toast('Add failed: '+e.message, 'error');
+  }
+}
+
+async function pollWineResult(wineId, attempts=0) {
+  if (attempts > 30) return; // Max ~60s
+  try {
+    const w = await ap(`/wines/${wineId}`);
+    if (w.enrichment_status !== 'pending') {
+      showRecentlyAdded(wineId);
+      loadStats();
+      return;
+    }
+    setTimeout(() => pollWineResult(wineId, attempts+1), 2000);
+  } catch {}
+}
+
+async function showRecentlyAdded(wineId) {
+  try {
+    const [w, rv] = await Promise.all([ap(`/wines/${wineId}`), ap(`/wines/${wineId}/reviews`)]);
+    const res = document.getElementById('aw-result');
+    res.style.display = 'block';
+    if (rv.reviews.length > 0) {
+      const best = rv.reviews[0];
+      res.innerHTML = `
+        <div style="background:var(--bg3);border:1px solid var(--teal);border-radius:var(--r2);padding:16px;">
+          <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--teal);margin-bottom:10px;">
+            ✓ ${rv.reviews.length} Review(s) Found
+          </div>
+          ${rv.reviews.map(r => `
+            <div style="background:var(--bg4);border-radius:var(--r);padding:12px;margin-bottom:8px;border-left:3px solid var(--teal);">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                <span style="font-size:22px;font-weight:800;color:var(--teal);">${r.score_20 ? r.score_20.toFixed(1) : '—'}<span style="font-size:12px;color:var(--text3)">/20</span></span>
+                <div>
+                  <div style="font-weight:600;">${esc(r.reviewer||'?')}</div>
+                  <div style="font-size:11px;color:var(--text3);">${esc(r.date_tasted||'')} ${r.drink_from?'· Drink '+r.drink_from+'–'+r.drink_to:''}</div>
+                </div>
+                ${r.review_url ? `<a href="${r.review_url}" target="_blank" class="btn btn-outline" style="margin-left:auto;font-size:11px;padding:3px 9px;">Open ↗</a>` : ''}
+              </div>
+              ${r.note ? `<div style="font-size:12px;color:var(--text2);border-left:2px solid var(--border2);padding-left:10px;line-height:1.7;">${esc(r.note.slice(0,600))}${r.note.length>600?'…':''}</div>` : ''}
+            </div>`).join('')}
+          <button class="btn btn-outline" style="margin-top:6px;font-size:11px;" onclick="document.getElementById('aw-result').style.display='none'">Dismiss</button>
+        </div>`;
+    } else {
+      res.innerHTML = `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r2);padding:14px;color:var(--text2);font-size:13px;">No reviews found on JancisRobinson for this wine.</div>`;
+    }
+  } catch {}
+}
+
+async function loadManualWines() {
+  const el = document.getElementById('manual-wines-list');
+  try {
+    const d = await ap('/wines?sort=created_at&dir=desc&per_page=8');
+    const manual = d.wines.filter(w => w.added_manually);
+    if (!manual.length) {
+      el.innerHTML = '<div style="color:var(--text3);font-size:12px;">No manually added wines yet.</div>';
+      return;
+    }
+    el.innerHTML = manual.map(w => `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);" onclick="showDetail(${w.id})" style="cursor:pointer;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(w.name)}</div>
+          <div style="font-size:11px;color:var(--text3);">${esc(w.vintage||'NV')} ${w.lwin7?'· LWIN7:'+w.lwin7:''}</div>
+        </div>
+        ${w.maaike_score_20 ? `<span class="sbadge ${scls(w.maaike_score_20)}" style="font-size:11px;">${w.maaike_score_20.toFixed(1)}</span>` : ''}
+        <span class="spill ${w.enrichment_status}">${w.enrichment_status}</span>
+        <button class="btn-ghost" onclick="event.stopPropagation();enrichSingle(${w.id})" title="Re-search reviews">🔄</button>
+      </div>`).join('');
+  } catch { el.innerHTML = '<div style="color:var(--red);">Error loading</div>'; }
+}
+
+// ─── Sources ─────────────────────────────────────────────────────────────────
+async function loadSources() {
+  try {
+    const [d, stats] = await Promise.all([ap('/sources'), ap('/stats')]);
+    const grid = document.getElementById('src-grid');
+    grid.innerHTML = Object.entries(d.sources).map(([key, s]) => `
+      <div class="src-card ${s.enabled?'enabled':'disabled'}">
+        <div class="src-icon">${s.icon}</div>
+        <div class="src-name">${esc(s.name)}</div>
+        <div class="src-url">${esc(s.url)}</div>
+        <div class="src-status ${s.enabled?'on':'off'}">${s.enabled?'● ACTIVE':'○ INACTIVE'}</div>
+        ${s.needs_cookies ? `<div style="font-size:10px;color:var(--text3);margin-top:4px;">Requires authenticated cookies</div>` : ''}
+      </div>`).join('');
+
+    const ss = document.getElementById('src-stats');
+    if (stats.by_source?.length) {
+      ss.innerHTML = stats.by_source.map(s => `
+        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;">
+          <span>${esc(s.source)}</span><span style="color:var(--teal);font-weight:700;">${s.count} reviews</span>
+        </div>`).join('');
+    } else {
+      ss.innerHTML = '<div style="color:var(--text3);">No reviews yet</div>';
+    }
+  } catch {}
+}
+
+// ─── CSV Upload ───────────────────────────────────────────────────────────────
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dz').classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+}
+async function handleFile(file) {
+  if (!file) return;
+  const dz = document.getElementById('dz');
+  dz.innerHTML = `<div style="font-size:24px;">⏳</div><div>Uploading <strong>${esc(file.name)}</strong>…</div>`;
+  const form = new FormData(); form.append('file', file);
+  try {
+    const r = await fetch(`${API}/upload`, {method:'POST',headers:{'X-API-Key':AK},body:form});
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('ur').style.display='block';
+      document.getElementById('ur').innerHTML = `
+        <div style="color:var(--green);font-weight:700;margin-bottom:8px;">✓ Upload successful</div>
+        <div style="font-size:13px;color:var(--text2);line-height:2;">
+          Inserted: <strong style="color:var(--text)">${d.inserted}</strong> &nbsp;
+          Duplicates: <strong style="color:var(--text)">${d.dupes}</strong> &nbsp;
+          Errors: <strong style="color:var(--red)">${d.errors}</strong> &nbsp;
+          Total: <strong style="color:var(--text)">${d.total}</strong>
+        </div>`;
+      toast(`Imported ${d.inserted} wines!`, 'success');
+      loadStats();
+    } else toast(d.error||'Upload failed','error');
+  } catch(e) { toast('Upload error: '+e,'error'); }
+  dz.innerHTML = `<input type="file" id="csvf" accept=".csv" onchange="handleFile(this.files[0])"/><div style="font-size:28px;margin-bottom:8px;">📄</div><div>Click or drag another .csv file</div>`;
+  dz.onclick = () => document.getElementById('csvf').click();
+}
+
+function downloadCSV(only='') {
+  const p = new URLSearchParams({api_key:AK});
+  const st = document.getElementById('f-status')?.value;
+  if(st) p.set('status',st);
+  if(only) p.set('only',only);
+  window.open(`${API}/download?${p}`,'_blank');
+}
+
+// ─── Enrichment ───────────────────────────────────────────────────────────────
+async function startEnrich() {
+  try {
+    await ap('/enrich/start', {method:'POST', body:JSON.stringify({
+      limit:     parseInt(document.getElementById('el').value)||0,
+      sleep:     parseFloat(document.getElementById('es').value),
+      only_pending: document.getElementById('esc2').value==='pending'
+    })});
+    setEnrichRunning(true);
+    toast('Enrichment started!','success');
+  } catch(e) { toast('Failed: '+e.message,'error'); }
+}
+async function stopEnrich() {
+  try { await ap('/enrich/stop',{method:'POST'}); toast('Stop signal sent.','info'); }
+  catch(e) { toast('Error: '+e.message,'error'); }
+}
+function setEnrichRunning(r) {
+  document.getElementById('erb').style.display = r?'flex':'none';
+  document.getElementById('estart').style.display = r?'none':'';
+  document.getElementById('estop').style.display  = r?'':'none';
+}
+function updateProgress(d) {
+  document.getElementById('epbar').style.width = d.pct+'%';
+  document.getElementById('epct').textContent  = d.pct+'%';
+  document.getElementById('ecnt').textContent  = `${d.done}/${d.total} · ✓${d.found} found · ✗${d.errors} err`;
+  if (!d.running && d.done > 0) {
+    setEnrichRunning(false); loadStats();
+    toast(`Done: ${d.found}/${d.total} found (${d.pct}%)`, 'success');
+  }
+}
+function appendLog(msg, level='info') {
+  const b = document.getElementById('elog');
+  const d = document.createElement('div'); d.className='ll '+level; d.textContent=msg;
+  b.appendChild(d); b.scrollTop=b.scrollHeight;
+}
+
+// ─── Cookie / Settings ────────────────────────────────────────────────────────
+async function loadCookieStatus() {
+  try {
+    const d = await ap('/cookies/status');
+    const b = document.getElementById('cstatus-body');
+    const cls = d.ok && d.days_remaining > 5 ? 'ok' : 'warn';
+    if (d.ok) {
+      b.innerHTML = `
+        <div class="cstatus ${cls}">${cls==='ok'?'✓':'⚠'} JWT valid — ${d.days_remaining} days</div>
+        <div style="margin-top:10px;font-size:12px;line-height:2;color:var(--text2);">
+          Member: <strong>${d.is_member?'Yes':'No'}</strong><br>
+          Tasting notes: <strong>${d.tasting_access?'Yes':'No'}</strong><br>
+          Session cookie: <strong style="color:${d.has_session?'var(--green)':'var(--red)'}">${d.has_session?'✓ Present':'✗ Missing'}</strong><br>
+          Cookies loaded: <strong>${d.cookie_count}</strong>
+        </div>`;
+    } else b.innerHTML = `<div class="cstatus warn">⚠ ${esc(d.message)}</div>`;
+  } catch {}
+}
+async function uploadCookies(file) {
+  const form = new FormData(); form.append('file',file);
+  try {
+    const r = await fetch(`${API}/cookies`,{method:'POST',headers:{'X-API-Key':AK},body:form});
+    const d = await r.json();
+    if(d.ok){toast(`Cookies updated (${d.cookies})!`,'success');loadCookieStatus();}
+    else toast(d.error,'error');
+  } catch(e) { toast('Error: '+e,'error'); }
+}
+async function loadSysInfo() {
+  try {
+    const d = await ap('/stats');
+    document.getElementById('sysinfo').innerHTML = `
+      <div style="font-size:12px;line-height:2;color:var(--text2);">
+        Total wines: <strong style="color:var(--text)">${d.total.toLocaleString()}</strong><br>
+        Total reviews: <strong style="color:var(--purple)">${(d.total_reviews||0).toLocaleString()}</strong><br>
+        Coverage: <strong style="color:var(--teal)">${d.coverage}%</strong><br>
+        Avg score: <strong>${d.avg_score?d.avg_score.toFixed(2)+'/20':'—'}</strong><br>
+        Enrichment: <strong style="color:${d.enrichment_running?'var(--teal)':'var(--text2)'}">${d.enrichment_running?'Running':'Idle'}</strong>
+      </div>`;
+  } catch {}
+}
+async function resetNotFound() {
+  if(!confirm('Reset all "not_found" to "pending"?')) return;
+  try {
+    const d = await ap('/admin/reset-not-found',{method:'POST'});
+    toast(`Reset ${d.reset} wines to pending`,'success'); loadStats();
+  } catch(e) { toast('Error: '+e,'error'); }
+}
+
+// ─── Navigation ───────────────────────────────────────────────────────────────
+function showPage(name, btn) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('active'));
+  document.getElementById(`page-${name}`)?.classList.add('active');
+  if(btn) btn.classList.add('active');
+  if(name==='wines') loadWines();
+  if(name==='dashboard') loadStats();
+  if(name==='settings') { loadCookieStatus(); loadSysInfo(); }
+  if(name==='sources') loadSources();
+  if(name==='addwine') loadManualWines();
+}
+function togglePanel(bodyId, toggleId) {
+  const b=document.getElementById(bodyId), t=document.getElementById(toggleId);
+  if(b.style.maxHeight==='0px'){b.style.maxHeight='';t.textContent='▾';}
+  else{b.style.maxHeight='0px';t.textContent='▸';}
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+async function ap(path, opts={}) {
+  const h = {'X-API-Key':AK,'Content-Type':'application/json',...(opts.headers||{})};
+  delete opts.headers;
+  const r = await fetch(API+path, {...opts, headers:h});
+  if(r.status===401){signout();throw new Error('Unauthorized');}
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+function esc(s) {
+  if(s==null)return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function toast(msg, type='info') {
+  const c=document.getElementById('tc'), t=document.createElement('div');
+  t.className=`toast ${type}`; t.textContent=msg; c.appendChild(t);
+  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300);},4000);
+}
+document.addEventListener('keydown', e=>{if(e.key==='Escape')closeMod();});
+</script>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</body>
+</html>

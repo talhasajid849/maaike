@@ -5,7 +5,7 @@ import { ap, scls, API } from '../api.js';
 const INIT_FILTERS = {
   search: '', status: '', vintage: '', colour: '', region: '',
   reviewer: '', source: '', minScore: '', maxScore: '', lwin: '',
-  hasNote: '', minReviews: '', minNoteLen: '', dateFrom: '', dateTo: '', reviewYear: '',
+  hasNote: '', minReviews: '',  dateFrom: '', dateTo: '', reviewYear: '',
 };
 
 export default function WineList() {
@@ -38,7 +38,7 @@ export default function WineList() {
       colour: filters.colour, region: filters.region, reviewer: filters.reviewer,
       source: filters.source, min_score: filters.minScore, max_score: filters.maxScore,
       lwin: filters.lwin, has_note: filters.hasNote, min_reviews: filters.minReviews,
-      min_note_len: filters.minNoteLen, date_from: filters.dateFrom,
+       date_from: filters.dateFrom,
       date_to: filters.dateTo, review_year: filters.reviewYear,
       sort: sortField, dir: sortDir,
     });
@@ -47,6 +47,7 @@ export default function WineList() {
       setWines(d.wines);
       setTotal(d.total);
       setPages(d.pages);
+      console.log(d)
     } catch (e) { addToast('Error loading wines: ' + e.message, 'error'); }
   }, [filters, sortField, sortDir, page, perPage, apiKey, addToast]);
 
@@ -91,7 +92,6 @@ export default function WineList() {
       if (filters.lwin)       p.set('lwin',        filters.lwin);
       if (filters.hasNote)    p.set('has_note',    filters.hasNote);
       if (filters.minReviews) p.set('min_reviews', filters.minReviews);
-      if (filters.minNoteLen) p.set('min_note_len',filters.minNoteLen);
       if (filters.dateFrom)   p.set('date_from',   filters.dateFrom);
       if (filters.dateTo)     p.set('date_to',     filters.dateTo);
       if (filters.reviewYear) p.set('review_year', filters.reviewYear);
@@ -197,10 +197,6 @@ export default function WineList() {
                   <input type="number" min="0" placeholder="e.g. 2"
                     value={filters.minReviews} onChange={e => { setFilter('minReviews', e.target.value); debounce(); }} />
                 </div>
-                <div className="fg"><label>Min Note Length (chars)</label>
-                  <input type="number" min="0" step="50" placeholder="e.g. 200"
-                    value={filters.minNoteLen} onChange={e => { setFilter('minNoteLen', e.target.value); debounce(); }} />
-                </div>
                 <div className="fg"><label>📅 Review Date From</label>
                   <input type="date" value={filters.dateFrom} onChange={e => { setFilter('dateFrom', e.target.value); debounce(); }} />
                 </div>
@@ -246,12 +242,12 @@ export default function WineList() {
               <tr>
                 <SortTh field="name" label="Wine Name" />
                 <SortTh field="vintage" label="Vintage" />
-                <SortTh field="lwin7" label="LWIN7" />
+                <SortTh field="lwin11" label="LWIN11" />
                 <SortTh field="maaike_score_20" label="Score /20" />
                 <SortTh field="maaike_review_count" label="Reviews" />
                 <th>Reviewer</th>
                 <SortTh field="maaike_date_tasted" label="Review Date" />
-                <SortTh field="maaike_note_length" label="Note" />
+                
                 <th>Region</th>
                 <SortTh field="price_eur" label="Price EUR" />
                 <th>Status</th>
@@ -302,8 +298,8 @@ function WineRow({ w, onClick, onLwinClick }) {
       </td>
       <td>{w.vintage || 'NV'}</td>
       <td>
-        {w.lwin7
-          ? <span className="lwin-chip" onClick={e => { e.stopPropagation(); onLwinClick(w.lwin7); }} title="Click to filter by LWIN7">{w.lwin7}</span>
+        {w.lwin11
+          ? <span className="lwin-chip" onClick={e => { e.stopPropagation(); onLwinClick(w.lwin11); }} title="Click to filter by LWIN11">{w.lwin11}</span>
           : <span style={{ color: 'var(--text3)' }}>—</span>
         }
       </td>
@@ -326,17 +322,7 @@ function WineRow({ w, onClick, onLwinClick }) {
           : <span style={{ color: 'var(--text3)' }}>—</span>
         }
       </td>
-      <td>
-        {nl > 0
-          ? <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} title={`${nl} chars`}>
-              <div style={{ width: 36, height: 3, background: 'var(--bg4)', borderRadius: 2 }}>
-                <div style={{ width: Math.min(100, Math.round(nl / 600 * 100)) + '%', height: '100%', background: nl > 400 ? 'var(--teal)' : nl > 200 ? 'var(--blue)' : 'var(--text3)', borderRadius: 2 }} />
-              </div>
-              <span style={{ fontSize: 10, color: 'var(--text3)' }}>{nl}</span>
-            </div>
-          : <span style={{ color: 'var(--text3)' }}>—</span>
-        }
-      </td>
+     
       <td style={{ color: 'var(--text2)', fontSize: 11 }}>{w.region || w.appellation || '—'}</td>
       <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{w.price_eur || '—'}</td>
       <td><span className={`spill ${w.enrichment_status}`}>{w.enrichment_status}</span></td>

@@ -91,7 +91,7 @@ def init_db():
                 colour              TEXT,
                 appellation         TEXT,
                 lwin                TEXT,
-                lwin7               TEXT,
+                lwin11               TEXT,
                 -- Best review summary (for fast table display)
                 maaike_score        REAL,
                 maaike_score_20     REAL,
@@ -108,8 +108,7 @@ def init_db():
                 enrichment_status   TEXT DEFAULT 'pending',
                 added_manually      INTEGER DEFAULT 0,
                 created_at          TEXT DEFAULT (datetime('now')),
-                updated_at          TEXT DEFAULT (datetime('now')),
-                UNIQUE(name, vintage)
+                updated_at          TEXT DEFAULT (datetime('now'))
             );
 
             -- All individual reviews per wine per source
@@ -133,7 +132,7 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_wines_status    ON wines(enrichment_status);
-            CREATE INDEX IF NOT EXISTS idx_wines_lwin      ON wines(lwin7);
+            CREATE INDEX IF NOT EXISTS idx_wines_lwin11      ON wines(lwin11);
             CREATE INDEX IF NOT EXISTS idx_wines_score     ON wines(maaike_score_20);
             CREATE INDEX IF NOT EXISTS idx_reviews_wine    ON reviews(wine_id);
             CREATE INDEX IF NOT EXISTS idx_reviews_source  ON reviews(source);
@@ -146,15 +145,24 @@ def init_db():
         existing = {r[1] for r in conn.execute("PRAGMA table_info(wines)").fetchall()}
         for col, sql in [
             ("lwin",               "ALTER TABLE wines ADD COLUMN lwin TEXT"),
-            ("lwin7",              "ALTER TABLE wines ADD COLUMN lwin7 TEXT"),
+            ("lwin11",              "ALTER TABLE wines ADD COLUMN lwin11 TEXT"),
             ("maaike_note_length", "ALTER TABLE wines ADD COLUMN maaike_note_length INTEGER"),
             ("maaike_review_count","ALTER TABLE wines ADD COLUMN maaike_review_count INTEGER DEFAULT 0"),
             ("maaike_jr_lwin",     "ALTER TABLE wines ADD COLUMN maaike_jr_lwin TEXT"),
             ("added_manually",     "ALTER TABLE wines ADD COLUMN added_manually INTEGER DEFAULT 0"),
         ]:
-            if col not in existing:
-                conn.execute(sql)
+           if col not in existing:
+              conn.execute(sql)
 
+    # Enforce uniqueness by LWIN11 (only when lwin11 is present)
+        try:
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_wines_lwin11
+                ON wines(lwin11)
+                WHERE lwin11 IS NOT NULL AND trim(lwin11) != ''
+            """)
+        except Exception as e:
+            print("[WARN] Could not create unique LWIN11 index:", e)
 
 init_db()
 
@@ -282,12 +290,12 @@ def _build_wine_filters(args):
     source_filter = args.get("source", "")
 
     if search:
-        conds.append("(w.name LIKE ? OR w.appellation LIKE ? OR w.maaike_reviewer LIKE ? OR w.lwin LIKE ? OR w.lwin7 LIKE ?)")
+        conds.append("(w.name LIKE ? OR w.appellation LIKE ? OR w.maaike_reviewer LIKE ? OR w.lwin LIKE ? OR w.lwin11 LIKE ?)")
         s = f"%{search}%"; params += [s, s, s, s, s]
     if lwin_search:
         lc = re.sub(r"[^0-9]", "", lwin_search)
         if lc:
-            conds.append("(w.lwin LIKE ? OR w.lwin7 LIKE ? OR w.maaike_jr_lwin LIKE ?)")
+            conds.append("(w.lwin LIKE ? OR w.lwin11 LIKE ? OR w.maaike_jr_lwin LIKE ?)")
             params += [f"%{lc}%", f"%{lc}%", f"%{lc}%"]
     if status:
         conds.append("w.enrichment_status = ?"); params.append(status)
@@ -337,7 +345,7 @@ def wines():
 
     allowed_sorts = {"name","vintage","maaike_score_20","maaike_reviewer","maaike_drink_from",
                      "maaike_drink_to","region","colour","price_eur","maaike_review_count",
-                     "maaike_note_length","created_at","lwin7","maaike_date_tasted"}
+                     "maaike_note_length","created_at","lwin11","maaike_date_tasted"}
     if sort_by not in allowed_sorts:
         sort_by = "maaike_score_20"
 
@@ -348,7 +356,7 @@ def wines():
         rows  = conn.execute(f"""
             SELECT w.id, w.name, w.vintage, w.unit_size, w.price_eur, w.price_usd, w.stock,
                    w.supplier_url, w.region, w.country, w.colour, w.appellation,
-                   w.lwin, w.lwin7,
+                   w.lwin, w.lwin11,
                    w.maaike_score, w.maaike_score_20, w.maaike_reviewer, w.maaike_short_quote,
                    w.maaike_note_length, w.maaike_drink_from, w.maaike_drink_to,
                    w.maaike_review_url, w.maaike_date_tasted, w.maaike_colour,
@@ -384,7 +392,7 @@ def wine_detail(wine_id: int):
 @require_api_key
 def wine_update(wine_id: int):
     data    = request.get_json(silent=True) or {}
-    allowed = {"region","country","colour","appellation","price_eur","price_usd","stock","lwin","lwin7","name","vintage"}
+    allowed = {"region","country","colour","appellation","price_eur","price_usd","stock","lwin","lwin11","name","vintage"}
     fields  = {k: v for k, v in data.items() if k in allowed}
     if not fields:
         return jsonify({"error": "No valid fields"}), 400
@@ -435,19 +443,20 @@ def add_wine():
     if not name:
         return jsonify({"error": "Wine name is required"}), 400
 
-    # Parse LWIN7
-    lwin7 = ""
+    # Parse LWIN1
+    lwin11 = ""
     if lwin:
         raw = lwin.upper().replace("LWIN","")
-        lwin7 = raw[:7] if len(raw) >= 7 else raw
+        digits = re.sub(r"[^0-9]", "", raw)
+        lwin11 = digits[:11] if len(digits) >= 11 else digits
 
     with get_db() as conn:
         try:
             cur = conn.execute("""
-                INSERT INTO wines (name, vintage, lwin, lwin7, price_eur, price_usd,
+                INSERT INTO wines (name, vintage, lwin, lwin11, price_eur, price_usd,
                                    region, country, colour, stock, added_manually)
                 VALUES (?,?,?,?,?,?,?,?,?,?,1)
-            """, (name, vintage or None, lwin or None, lwin7 or None,
+            """, (name, vintage or None, lwin or None, lwin11 or None,
                   data.get("price_eur"), data.get("price_usd"),
                   data.get("region"), data.get("country"),
                   data.get("colour"), data.get("stock")))
@@ -601,11 +610,19 @@ def filter_options():
 
 # ─── CSV Upload ───────────────────────────────────────────────────────────────
 
-def _lwin7(lwin: str) -> str:
-    if not lwin: return ""
-    raw = lwin.upper().strip()
-    digits = raw[4:] if raw.startswith("LWIN") else raw
-    return digits[:7] if len(digits) >= 7 else ""
+def _lwin_digits(lwin: str) -> str:
+    raw = (lwin or "").upper().strip()
+    raw = raw[4:] if raw.startswith("LWIN") else raw
+    return re.sub(r"[^0-9]", "", raw)
+
+def _lwin11(lwin: str) -> str:
+    d = _lwin_digits(lwin)
+    return d[:11] if len(d) >= 11 else ""
+
+def _lwin_digits_len(lwin: str) -> int:
+    if not lwin:
+        return 0
+    return len(_lwin_digits(lwin))
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -654,16 +671,18 @@ def upload_csv():
             m = re.search(r"\b(19\d{2}|20[0-3]\d)\b", vintage)
             vintage_clean = m.group(1) if m else ""
 
-            lwin       = get(LWIN_COLS).strip()
-            lwin7_val  = _lwin7(lwin)
+            lwin_raw   = get(LWIN_COLS).strip()
+            lwin       = re.sub(r"\s+", "", lwin_raw).upper() if lwin_raw else ""
+            lwin11_val  = _lwin11(lwin)
+            lwin_len   = _lwin_digits_len(lwin)
 
             try:
                 with get_db() as conn:
                     conn.execute("""
-                        INSERT INTO wines (name, vintage, lwin, lwin7, unit_size, price_eur,
+                        INSERT INTO wines (name, vintage, lwin, lwin11, unit_size, price_eur,
                                           price_usd, stock, supplier_url, region, colour)
                         VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                    """, (name, vintage_clean or None, lwin or None, lwin7_val or None,
+                    """, (name, vintage_clean or None, lwin or None, lwin11_val or None,
                           get(SIZE_COLS) or None, get(PRICE_COLS) or None,
                           get(PRICE_USD) or None, get(STOCK_COLS) or None,
                           get(URL_COLS) or None, get(REGION_COLS) or None,
@@ -673,9 +692,13 @@ def upload_csv():
                 if lwin:
                     with get_db() as conn:
                         conn.execute("""
-                            UPDATE wines SET lwin=?, lwin7=?, updated_at=datetime('now')
-                            WHERE name=? AND vintage=? AND (lwin IS NULL OR lwin='')
-                        """, (lwin, lwin7_val, name, vintage_clean or None))
+                            UPDATE wines SET lwin=?, lwin11=?, updated_at=datetime('now')
+                            WHERE name=? AND vintage=?
+                              AND (
+                                    lwin IS NULL OR trim(lwin)=''
+                                    OR length(replace(upper(coalesce(lwin, '')), 'LWIN', '')) < ?
+                                  )
+                        """, (lwin, lwin11_val, name, vintage_clean or None, lwin_len))
                 dupes += 1
             except Exception:
                 errors += 1
@@ -703,13 +726,35 @@ def download_csv():
 
     with get_db() as conn:
         rows = conn.execute(f"""
-            SELECT w.name, w.vintage, w.lwin11, w.maaike_reviewer,
-                   w.maaike_score_20, w.maaike_drink_from, w.maaike_drink_to,
-                   w.maaike_date_tasted, w.maaike_short_quote
-            FROM wines w {where}
+            SELECT  w.name,
+                  w.vintage,
+                  w.lwin,
+                  r.reviewer,
+                  r.score_20,
+                  r.drink_from,
+                  r.drink_to,
+                  r.date_tasted,
+        r.note
+            FROM wines w 
+            LEFT JOIN reviews r
+          ON r.id = (
+            SELECT r2.id
+            FROM reviews r2
+            WHERE r2.wine_id = w.id
+              AND r2.note IS NOT NULL AND trim(r2.note) != ''
             ORDER BY
-                CASE WHEN w.maaike_score_20 IS NULL THEN 1 ELSE 0 END,
-                w.maaike_score_20 DESC
+              CASE
+                WHEN r2.date_tasted IS NULL OR trim(r2.date_tasted) = '' THEN 1
+                ELSE 0
+              END,
+              r2.date_tasted DESC,
+              r2.created_at DESC
+            LIMIT 1
+          )
+        {where}
+        ORDER BY
+          CASE WHEN r.date_tasted IS NULL OR trim(r.date_tasted) = '' THEN 1 ELSE 0 END,
+          r.date_tasted DESC
         """, params).fetchall()
 
     out = io.StringIO()
@@ -718,18 +763,18 @@ def download_csv():
                      "Critic_Name", "Score", "Drink_From", "Drink_To",
                      "Review_Date", "Review"])
     for r in rows:
-        name, vintage, lwin11, reviewer, score, drink_from, drink_to, date_tasted, note = r
+        name, vintage, lwin, reviewer, score, drink_from, drink_to, date_tasted, note = r
         writer.writerow([
             "Jancis Robinson",
-            lwin11 or "",
-            name or "",
-            vintage or "NV",
-            reviewer or "",
-            score if score is not None else "",
-            drink_from or "",
-            drink_to or "",
-            date_tasted or "",
-            note or "",
+        r["lwin"] or "",
+        r["name"] or "",
+        r["vintage"] or "NV",
+        r["reviewer"] or "",
+        r["score_20"] if r["score_20"] is not None else "",
+        r["drink_from"] if r["drink_from"] and r["drink_from"] != 1900 else "",
+        r["drink_to"] if r["drink_to"] and r["drink_to"] != 1900 else "",
+        r["date_tasted"] or "",
+            (r["note"] or "").strip(),
         ])
 
     out.seek(0)
@@ -853,11 +898,11 @@ def _run_enrichment(limit, sleep_sec, only_pending):
                else "WHERE enrichment_status IN ('pending','not_found')"
         lim  = f"LIMIT {limit}" if limit else ""
         rows = conn.execute(
-            f"SELECT id, name, vintage, lwin, lwin7 FROM wines {cond} ORDER BY RANDOM() {lim}"
+            f"SELECT id, name, vintage, lwin, lwin11 FROM wines {cond} ORDER BY RANDOM() {lim}"
         ).fetchall()
 
     wines = [{"id":r["id"],"name":r["name"],"vintage":r["vintage"] or "",
-              "lwin":r["lwin"] or "","lwin7":r["lwin7"] or ""} for r in rows]
+              "lwin":r["lwin"] or "","lwin11":r["lwin11"] or ""} for r in rows]
 
     enrich_state.update({"total": len(wines), "done": 0, "found": 0, "errors": 0})
     _emit_log(f"Starting {len(wines)} wines…", "info")
@@ -868,7 +913,7 @@ def _run_enrichment(limit, sleep_sec, only_pending):
         if enrich_state["stop_flag"]:
             _emit_log("⏹ Stopped.", "warn"); break
 
-        lwin_str = f" [LWIN7:{w['lwin7']}]" if w["lwin7"] else ""
+        lwin_str = f" [LWIN11:{w['lwin11']}]" if w["lwin11"] else ""
         _emit_log(f"[{i+1}/{len(wines)}] {w['name']} ({w['vintage'] or 'NV'}){lwin_str}", "info")
 
         try:

@@ -300,7 +300,10 @@ def _first(v: Any) -> str:
 
 def _parse_year(s: str) -> Optional[int]:
     m = re.search(r"\b(19\d{2}|20[0-3]\d)\b", str(s))
-    return int(m.group(1)) if m else None
+    if not m:
+        return None
+    year = int(m.group(1))
+    return year if year > 1900 else None  # 1900 is JR sentinel for "no data"
 
 def _parse_date(s: str) -> str:
     s = str(s or "").strip()
