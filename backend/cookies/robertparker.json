@@ -1,0 +1,67 @@
+[
+  {
+    "name": "didomi_token",
+    "value": "eyJ1c2VyX2lkIjoiMTljNTQzODgtNDkxOC02NmQ2LWEwNWMtNDJjZDQzYmRjNGE5IiwiY3JlYXRlZCI6IjIwMjYtMDItMTJUMjM6Mzg6MzYuMDQ5WiIsInVwZGF0ZWQiOiIyMDI2LTAyLTEyVDIzOjM4OjQwLjQxN1oiLCJ2ZW5kb3JzIjp7ImVuYWJsZWQiOlsiZ29vZ2xlIiwiYzptb3VzZWZsb3ciLCJjOmdvb2dsZWFuYS00VFhuSmlnUiIsImM6aW1hZ2luby1idGUzOUx3VyJdfSwicHVycG9zZXMiOnsiZW5hYmxlZCI6WyJhYnRlc3Rpbmcta3pVQ0I3OHciLCJwZXJzb25hbGl6LXd0ell5Q1dKIiwiZ2VvX21hcmtldGluZ19zdHVkaWVzIl19LCJ2ZW5kb3JzX2xpIjp7ImVuYWJsZWQiOlsiZ29vZ2xlIl19LCJ2ZXJzaW9uIjoyfQ==",
+    "domain": ".robertparker.com",
+    "path": "/",
+    "expires": 1802561920,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "euconsent-v2",
+    "value": "CQfgvAAQfgvAAAHABBENCRFgAP_gAELAAAqIF5wAQF5gXnABAXmAAAAA.f_wACFgAAAAA",
+    "domain": ".robertparker.com",
+    "path": "/",
+    "expires": 1802561920,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "_ga",
+    "value": "GA1.1.602100515.1770939517",
+    "domain": ".robertparker.com",
+    "path": "/",
+    "expires": 1805126920,
+    "httpOnly": false,
+    "secure": false
+  },
+  {
+    "name": "__smVID",
+    "value": "bca344caae5c1009987c0b72836b4cefa6b7d67ea6d650fa014c47c5eebdd407",
+    "domain": "www.robertparker.com",
+    "path": "/",
+    "expires": 1774954895,
+    "httpOnly": false,
+    "secure": false
+  },
+  {
+    "name": "RPWA_AUTH",
+    "value": "%7B%22type%22%3A%22user%22%2C%22token%22%3A%22eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJxWWJBN2QycUlBVndwbFo3SCIsIm5hbWUiOiJCYXJ0IExhbWluZyIsInRpbWVzdGFtcCI6MTc3MjMzMDA2MDE0MywidXVpZCI6IjZkMjE2YTQ0LThjZGItNDI0NS1iZTQ2LTM2MTNlMzdmYjAwYyIsImlhdCI6MTc3MjMzMDA2MCwiZXhwIjoxNzc0OTIyMDYwfQ.v0bSJaDJc0ODMrtL5g6u48EHIQGEnOBZ6HMZswRBbqg%22%2C%22tokenExpiry%22%3A%222026-03-31T00%3A00%3A00.000Z%22%2C%22refreshToken%22%3A%22eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJxWWJBN2QycUlBVndwbFo3SCIsImlhdCI6MTc3MjMzMDA2MCwiZXhwIjoxNzc2MjE4MDYwfQ.O6OfSJz50yDk_VRKuOmtwagdYw-j8TkCQV2ILlurnZo%22%2C%22refreshTokenExpiry%22%3A%222026-04-15T00%3A00%3A00.000Z%22%2C%22clientId%22%3A%22XDNQ5H2T6PREHPHDAJL2WD8GWWWC8KQC%22%2C%22userId%22%3A%22qYbA7d2qIAVwplZ7H%22%2C%22country%22%3A%22%22%7D",
+    "domain": "www.robertparker.com",
+    "path": "/",
+    "expires": 1777575600,
+    "httpOnly": false,
+    "secure": false
+  },
+  {
+    "name": "LastLogin",
+    "value": "%222026-04-01T01%3A50%3A40.727Z%22",
+    "domain": "www.robertparker.com",
+    "path": "/",
+    "expires": 1775008240,
+    "httpOnly": false,
+    "secure": false
+  },
+  {
+    "name": "_ga_KYHM7TYYYP",
+    "value": "GS2.1.s1772362838$o5$g1$t1772362895$j3$l0$h0",
+    "domain": ".robertparker.com",
+    "path": "/",
+    "expires": 1806550295,
+    "httpOnly": false,
+    "secure": false
+  }
+]

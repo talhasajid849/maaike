@@ -1,62 +1,41 @@
-import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
-import { getSocket, disconnectSocket } from '../socket.js';
 
-const PAGES = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'wines',     label: 'Wine List' },
-  { key: 'addwine',  label: '+ Add Wine' },
-  { key: 'upload',   label: 'Upload CSV' },
-  { key: 'sources',  label: 'Sources' },
-  { key: 'settings', label: 'Settings' },
+const NAV = [
+  { id: 'dashboard', label: 'Dashboard'   },
+  { id: 'wines',     label: 'Wine List'   },
+  { id: 'addwine',   label: 'Add Wine'    },
+  { id: 'upload',    label: 'Upload'      },
+  { id: 'sources',   label: 'Sources'     },
+  { id: 'settings',  label: 'Settings'    },
 ];
 
 export default function Header() {
-  const { currentPage, setCurrentPage, setApiKey, apiKey } = useApp();
-  const [wsStatus, setWsStatus] = useState({ cls: 'dot warn', label: 'Connecting…' });
-
-  useEffect(() => {
-    const sock = getSocket();
-    sock.on('connect',       () => setWsStatus({ cls: 'dot', label: 'Live' }));
-    sock.on('disconnect',    () => setWsStatus({ cls: 'dot err', label: 'Disconnected' }));
-    sock.on('connect_error', () => setWsStatus({ cls: 'dot warn', label: 'Reconnecting…' }));
-    return () => {
-      sock.off('connect');
-      sock.off('disconnect');
-      sock.off('connect_error');
-    };
-  }, []);
-
-  function signout() {
-    setApiKey('');
-    disconnectSocket();
-  }
+  const { currentPage, setCurrentPage } = useApp();
 
   return (
-    <header>
-      <div className="logo">MAAIKE <span>WINE INTELLIGENCE</span></div>
-      <nav>
-        {PAGES.map(p => (
+    <header className="bg-bg2 border-b border-border h-[50px] flex items-center gap-3.5 px-5 sticky top-0 z-50">
+      <div className="text-lg font-extrabold tracking-[3px] text-teal whitespace-nowrap">
+        MAAIKE
+        <span className="text-text3 font-normal text-2xs tracking-wide ml-2">
+          WINE INTELLIGENCE
+        </span>
+      </div>
+
+      <nav className="flex gap-0.5 ml-auto">
+        {NAV.map(n => (
           <button
-            key={p.key}
-            className={`nb ${currentPage === p.key ? 'active' : ''}`}
-            onClick={() => setCurrentPage(p.key)}
+            key={n.id}
+            onClick={() => setCurrentPage(n.id)}
+            className={`px-3 py-1.5 rounded text-sm border-none transition-all duration-150 cursor-pointer
+              ${currentPage === n.id
+                ? 'bg-bg4 text-text1'
+                : 'bg-transparent text-text2 hover:bg-bg4 hover:text-text1'
+              }`}
           >
-            {p.label}
+            {n.label}
           </button>
         ))}
       </nav>
-      <div className="hs">
-        <div className={wsStatus.cls} />
-        <span>{wsStatus.label}</span>
-        <button
-          className="btn btn-outline"
-          style={{ marginLeft: 6, padding: '4px 9px', fontSize: 11 }}
-          onClick={signout}
-        >
-          Sign Out
-        </button>
-      </div>
     </header>
   );
 }

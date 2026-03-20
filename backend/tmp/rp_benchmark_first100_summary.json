@@ -1,0 +1,16 @@
+{
+  "tested_rows": 98,
+  "elapsed_sec": 449.21,
+  "found_count": 52,
+  "found_pct": 53.06,
+  "found_with_note_count": 52,
+  "found_with_note_pct_of_found": 100.0,
+  "error_count": 0,
+  "expected_labeled_rows": 25,
+  "exact_url_match_count": 1,
+  "exact_url_match_pct_on_labeled": 4.0,
+  "name_match_count": 20,
+  "name_match_pct_on_labeled": 80.0,
+  "url_or_name_match_count": 21,
+  "url_or_name_match_pct_on_labeled": 84.0
+}

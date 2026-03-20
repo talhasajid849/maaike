@@ -5,8 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:5000',
-      // Socket.IO connects directly to Flask (see socket.js) — no proxy needed here.
+      '/api':       'http://localhost:5000',
+      '/socket.io': { target: 'http://localhost:5000', ws: true },
     },
   },
 });

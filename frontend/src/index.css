@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Global resets ───────────────────────────────────── */
+* { box-sizing: border-box; }
+
+body {
+  background-color: #0d1117;
+  color: #e6edf3;
+  font-family: 'Geist', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Custom scrollbar ────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #161b22; }
+::-webkit-scrollbar-thumb { background: #444c56; border-radius: 3px; }
+
+/* ── Range input ─────────────────────────────────────── */
+input[type=range] {
+  -webkit-appearance: none;
+  height: 4px;
+  background: #21262d;
+  border-radius: 2px;
+  outline: none;
+  border: none;
+  padding: 0;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  background: #00bfa5;
+  border-radius: 50%;
+}
+
+/* ── Animations ──────────────────────────────────────── */
+@keyframes pulse   { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+@keyframes toastIn { from { transform:translateX(16px); opacity:0 } to { transform:translateX(0); opacity:1 } }
+@keyframes spin    { to { transform: rotate(360deg); } }
+
+.animate-pulse-dot  { animation: pulse 1.4s infinite; }
+.animate-toast-in   { animation: toastIn .25s ease; }
+.animate-spin-slow  { animation: spin 1s linear infinite; }

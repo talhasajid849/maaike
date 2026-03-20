@@ -1,17 +1,24 @@
+/**
+ * context/AppContext.jsx
+ * =======================
+ * Global app state — apiKey, current page, toast queue, wine modal.
+ * Think of this like your Express req.user / session state.
+ */
 import { createContext, useContext, useState, useCallback } from 'react';
 
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
-  const [apiKey, setApiKeyState] = useState(() => localStorage.getItem('maaike_ak') || '');
+  const [apiKey,      setApiKeyState] = useState(() => sessionStorage.getItem('maaike_key') || '');
   const [currentPage, setCurrentPage] = useState('dashboard');
-  const [toasts, setToasts] = useState([]);
+  const [uploadTab,   setUploadTab]   = useState('inventory');
   const [wineModalId, setWineModalId] = useState(null);
+  const [toasts,      setToasts]      = useState([]);
 
   const setApiKey = useCallback((key) => {
     setApiKeyState(key);
-    if (key) localStorage.setItem('maaike_ak', key);
-    else localStorage.removeItem('maaike_ak');
+    if (key) sessionStorage.setItem('maaike_key', key);
+    else     sessionStorage.removeItem('maaike_key');
   }, []);
 
   const addToast = useCallback((msg, type = 'info') => {
@@ -24,8 +31,9 @@ export function AppProvider({ children }) {
     <AppContext.Provider value={{
       apiKey, setApiKey,
       currentPage, setCurrentPage,
-      toasts, addToast,
+      uploadTab, setUploadTab,
       wineModalId, setWineModalId,
+      toasts, addToast,
     }}>
       {children}
     </AppContext.Provider>
@@ -33,5 +41,7 @@ export function AppProvider({ children }) {
 }
 
 export function useApp() {
-  return useContext(AppContext);
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used inside AppProvider');
+  return ctx;
 }

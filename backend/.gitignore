@@ -1,0 +1,12 @@
+node_modules
+dist
+package-lock.json
+
+.claude
+.venv
+
+dashboard.html.bak
+
+.env
+.env.local
+.env.*.local

@@ -1,0 +1,121 @@
+import urllib.parse
+
+wines = [
+    ("Chateau La Fleur de Bouard, Lalande de Pomerol", "2020"),
+    ("Domaine d'Eugenie, Vosne-Romanee Premier Cru, Aux Brulees", "2020"),
+    ("Domaine Jean-Pierre Guyon, Mes Nuages, VdF", "2022"),
+    ("Chateau Tour de Pez, Les Hauts de Pez, Saint-Estephe", "2019"),
+    ("Agnes et Didier Dauvissat, Chablis Premier Cru, Beauroy", "2020"),
+    ("Domaine Rostaing, Cote Rotie, La Landonne", "2018"),
+    ("Azienda Agricola Salvioni La Cerbaiola, Brunello di Montalcino", "2020"),
+    ("Mauro Veglio, Barolo, Paiagallo", "2019"),
+    ("Georges Lignier et Fils, Gevrey-Chambertin", "2022"),
+    ("Remirez de Ganuza, Trasnocho, Rioja", "2011"),
+    ("Domaine Christophe Billon, Cote Rotie, Elotins", "2016"),
+    ("Chateau Cadet-Piola Grand Cru Classe, Saint-Emilion Grand Cru", "2009"),
+    ("Macallan, Highland Single Malt Enigma, Speyside", "NV"),
+    ("Chateau Rauzan-Segla 2eme Cru Classe, Margaux", "1999"),
+    ("Glenfarclas, Highland Single Malt Speyside", "2008"),
+    ("Domaine Anne-Francoise Gros, En Mortperay, Moulin-a-Vent", "2022"),
+    ("Krug, Vintage Brut", "2003"),
+    ("San Giusto a Rentennano, Chianti Classico, Le Baroncole Riserva", "2020"),
+    ("Chateau d'Esclans, Rose Esclans, Cotes de Provence", "2023"),
+    ("Moet & Chandon, Grand Vintage Collection", "1996"),
+    ("Xavier Monnot, Puligny-Montrachet Premier Cru, Les Folatieres", "2023"),
+    ("Famille Perrin, Gigondas, Domaine du Clos des Tourelles", "2015"),
+    ("Domaine Stephane Magnien, Morey-Saint-Denis, Vieilles Vignes", "2022"),
+    ("Jean-Marc Blain-Gagnard, Chassagne-Montrachet, Rouge", "2019"),
+    ("Francis Boulard, Petraea XCVII-MM", "NV"),
+    ("Domaine Charles Audoin, Marsannay, Les Longeroles", "2022"),
+    ("Chateau La Croix de St-Georges, Saint-Georges-Saint-Emilion", "2020"),
+    ("Domaine Francois Raveneau, Chablis Premier Cru, Vaillons", "2020"),
+    ("Chateau Malescot St. Exupery 3eme Cru Classe, Margaux", "2015"),
+    ("Auguste Clape, Cornas", "2019"),
+    ("Chateau Olivier, Blanc Cru Classe, Pessac-Leognan", "2023"),
+    ("Franck Balthazar, Cornas, Chaillot", "2021"),
+    ("Altesino, Borgo Altesi, IGT", "1997"),
+    ("Joseph Drouhin, Bonnes Mares Grand Cru", "2017"),
+    ("Domaine Bruno Clair, Savigny-les-Beaune Premier Cru, Les Jarrons", "2019"),
+    ("Domaine Le Guellec-Ducouet, Gevrey-Chambertin, Les Jeunes Rois", "2022"),
+    ("Domaine Jacques Carillon, Puligny-Montrachet Premier Cru, Les Perrieres", "2018"),
+    ("Arnaud Mortet, Gevrey-Chambertin Premier Cru, Lavaut Saint-Jacques", "2021"),
+    ("Espectacle, Montsant", "2022"),
+    ("Chateau Pichon Longueville Comtesse de Lalande 2eme Cru Classe, Pauillac", "1986"),
+    ("Clos Fourtet Premier Grand Cru Classe B, Saint-Emilion Grand Cru", "2019"),
+    ("Ciacci Piccolomini d'Aragona, Brunello di Montalcino, Vigna di Pianrosso Riserva", "2007"),
+    ("Pierre Girardin, Beaune Premier Cru, Les Greves", "2019"),
+    ("Domaine Arnoux-Lachaux, Vosne-Romanee Premier Cru, Les Grands Suchots", "2014"),
+    ("Xavier Monnot, Meursault Premier Cru, Charmes", "2022"),
+    ("Domaine Ponsot, Clos Saint-Denis Grand Cru, Cuvee Tres Vieilles Vignes", "2008"),
+    ("Shafer, Hillside Select, Stags Leap District", "2004"),
+    ("Joseph Drouhin, Chambertin-Clos de Beze Grand Cru", "2017"),
+    ("Chateau Vray Croix de Gay, Pomerol", "2019"),
+    ("Calera, Chardonnay, Central Coast", "2020"),
+    ("Lignier-Michelot, Clos Saint-Denis Grand Cru", "2019"),
+    ("Chateau Pichon Baron 2eme Cru Classe, Pauillac", "2021"),
+    ("Bruno Giacosa, Barolo, Falletto Vigna Le Rocche Riserva", "2008"),
+    ("Chateau Bourgneuf, Pomerol", "2020"),
+    ("Secondo Marco, Amarone della Valpolicella, Classico", "2013"),
+    ("Francois Feuillet, Morey-Saint-Denis Premier Cru, Clos Sorbe", "2017"),
+    ("Cedric Bouchard, Roses de Jeanne Les Ursules Blanc de Noirs", "2016"),
+    ("Domaine de la Romanee-Conti, Assortment Case", "2010"),
+    ("Egon Muller, Scharzhofberger Riesling Spatlese, Mosel", "2020"),
+    ("Domaine Francois Raveneau, Chablis Premier Cru, Vaillons", "2021"),
+    ("Jean-Michel Gerin, Condrieu, Les Eguets", "2022"),
+    ("Domaine de la Romanee-Conti, Romanee-Conti Grand Cru", "1958"),
+    ("Antinori, Brunello di Montalcino, Vigna Ferrovia Riserva", "2010"),
+    ("Domaine Arlaud, Bonnes Mares Grand Cru", "2019"),
+    ("Peyre Rose, Marlene N3, VdF", "2014"),
+    ("Furst, Schlossberg Spatburgunder GG, Franken", "2021"),
+    ("Maison Domaine des Heritiers Louis Jadot, Chevalier-Montrachet Grand Cru, Les Demoiselles", "2021"),
+    ("Domaine Sylvain Cathiard, Nuits-Saint-Georges, Rouge", "2017"),
+    ("Produttori del Barbaresco, Barbaresco, Rio Sordo Riserva", "2020"),
+    ("Joseph Drouhin, Griotte-Chambertin Grand Cru", "2021"),
+    ("Chateau Marsau, Francs-Cotes de Bordeaux", "2020"),
+    ("Scarecrow, Cabernet Sauvignon, Rutherford", "2015"),
+    ("Domaine Georges Roumier, Chambolle-Musigny", "2021"),
+    ("Gianfranco Manca, Panevino Pikade, VdT", "2019"),
+    ("Ulysse Collin, Les Maillons Blanc de Noirs Extra Brut", "NV"),
+    ("Silvio Nardi, Brunello di Montalcino, Manachiara", "2004"),
+    ("Domaine Rossignol-Trapet, Gevrey-Chambertin Premier Cru, Clos Prieur", "2019"),
+    ("Patrick Piuze, Chablis, Terroir Courgis", "2023"),
+    ("Pierre & Marianne Duroche, Chambolle-Musigny Premier Cru, Les Fuees", "2021"),
+    ("Chateau Lanessan, Haut-Medoc", "2019"),
+    ("Pio Cesare, Barbaresco", "2019"),
+    ("Azienda Agricola Conterno Fantino, Barolo, Castelletto Pressenda", "2015"),
+    ("Catena Zapata, Adrianna Vineyard Fortuna Terrae Malbec, Tupungato", "2018"),
+    ("Rings, Weilberg Riesling GG, Pfalz", "2022"),
+    ("Savart & Dremont, Ephemere 017 Grand Cru, Champagne", "NV"),
+    ("Domaine Coquard Loison Fleurot, Echezeaux Grand Cru", "2017"),
+    ("Bollinger, La Grande Annee Rose", "2005"),
+    ("Ballot Millot, Meursault Premier Cru, Charmes", "2019"),
+    ("Simon Bize, Savigny-les-Beaune, Aux Grands Liards", "2022"),
+    ("R. Lopez de Heredia, Tondonia Blanco Reserva, Rioja", "2013"),
+    ("Domaine Fourrier, Gevrey-Chambertin Premier Cru, Les Goulots Vieille Vigne", "2022"),
+    ("Biondi-Santi, Brunello di Montalcino, Riserva", "2016"),
+    ("Le Benjamin de Beauregard, Pomerol", "2016"),
+    ("Pereira D'Oliveira, Boal, Madeira", "1968"),
+    ("Domaine Coquard Loison Fleurot, Clos de la Roche Grand Cru", "2022"),
+    ("E. Guigal, Cote Rotie, La Turque", "2020"),
+    ("Chateau La Clotte Grand Cru Classe, Saint-Emilion Grand Cru", "2013"),
+    ("Domaine Michel Noellat et Fils, Clos de Vougeot Grand Cru", "2017"),
+]
+
+def jr_url(name, vintage):
+    parts = [p.strip() for p in name.split(",") if p.strip()]
+    if len(parts) >= 3:
+        query = f"{parts[0]} {parts[2]}"
+    elif len(parts) == 2:
+        query = f"{parts[0]} {parts[1]}"
+    else:
+        query = name
+    if vintage and vintage.upper() not in ("NV", "N/V", ""):
+        query += f" {vintage}"
+    encoded = urllib.parse.quote(f'"{query}"')
+    return f"https://www.jancisrobinson.com/tastings?search-full={encoded}"
+
+for i, (name, vintage) in enumerate(wines, 1):
+    url = jr_url(name, vintage)
+    print(f"{i:>3}. {name} {vintage}")
+    print(f"     {url}")
+    print()

@@ -1,0 +1,14 @@
+{
+  "tested_rows": 98,
+  "found_count": 37,
+  "found_pct": 37.76,
+  "TP": 20,
+  "FN": 5,
+  "FP": 17,
+  "TN": 56,
+  "precision_pct": 54.05,
+  "recall_pct": 80.0,
+  "accuracy_pct": 77.55,
+  "expected_labeled_rows": 25,
+  "url_or_name_match_count": 18
+}

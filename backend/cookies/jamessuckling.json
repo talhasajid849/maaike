@@ -1,0 +1,65 @@
+[
+  {
+    "domain": "www.jamessuckling.com",
+    "hostOnly": true,
+    "httpOnly": true,
+    "name": "__Secure-next-auth.callback-url",
+    "path": "/",
+    "sameSite": "lax",
+    "secure": true,
+    "session": true,
+    "storeId": null,
+    "value": "https%3A%2F%2Fwww.jamessuckling.com"
+  },
+  {
+    "domain": "www.jamessuckling.com",
+    "hostOnly": true,
+    "httpOnly": true,
+    "name": "__Host-next-auth.csrf-token",
+    "path": "/",
+    "sameSite": "lax",
+    "secure": true,
+    "session": true,
+    "storeId": null,
+    "value": "cdfb4ddf4158360c1e676aedf7eaaaf1d330ea65487cf7dbd2da9644f09fa62e%7C14fe32a86933d3f40ee27d821353f55aa5f2aed93d27dc32d088fe8d0fb10fea"
+  },
+  {
+    "domain": "www.jamessuckling.com",
+    "expirationDate": 1803866703,
+    "hostOnly": true,
+    "httpOnly": false,
+    "name": "accepted_policy_cc",
+    "path": "/",
+    "sameSite": null,
+    "secure": true,
+    "session": false,
+    "storeId": null,
+    "value": "true"
+  },
+  {
+    "domain": "www.jamessuckling.com",
+    "expirationDate": 1776348495.716089,
+    "hostOnly": true,
+    "httpOnly": true,
+    "name": "__Secure-next-auth.session-token",
+    "path": "/",
+    "sameSite": "lax",
+    "secure": true,
+    "session": false,
+    "storeId": null,
+    "value": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..oGRc9kbI9bWYKNOc.tnBlM0XUm4v-ARvzFypJQWIfcRR04aoA04gahPeDsJJ0mKXnId0gb3iW7J-ryx-q2BEbc5xZrhBHUhHBlQ7Oy-BEEuGlgVYGXFI5AmLspbpQe8l-kL_QDNAPeWgPLBoIA0JFQHuw8Jo38ZDpAsmKHzSnnwIbhnNTwqR5wUd2wI30Ds0z0U4yHZd6Ob4iHpFyXqVqngXjFyuz0E9yhJj0V2S4Hrhyu92BOH7q_Kg11QUnj3DKUwcFwIKdAK1UMMih7HqpPJBAeMRANozddw68hUyJwR4S8Aw_WRC-uAdgYzm9CJvOnQnczzgx6X8p68Lp78qxE1QQKiX4qTzZk5b6QbWD_hxPfeTJnikSA0I7YyrLy0rs7C_eSWutWtUlUeKr9QlyqGZ3VjrPCJAMI-mPN-PWqfJdO7KgIVsA6H0oMSAlDuhP-diUK0W2r25y04AY9G3uQQc6-2HMJvm5xLHo52qHFLzZsqT4pdZHe-U1JrNZ9hs-j4RDJ27B2WYzy8q8tlyiV4QM8TrQe1Cmn0Mzjd73QAtaSTym-SzKzTu4d9KMGSGH-yFR5SgX3f6wIDejsHiWXbqK1GrOfdhr6Mi5_qbc28PYbCKHsU56Fx9lCw1-EM5UD8ckKfcKYExiJurGSI3ZwfQCVmSogJ_YucjGB_jkY8cmKnpZuSvS5MsIkgirdGCG08oHCnU48WUMRYg3E6uKfpJOnvPrWFeqag9DCcVGKZJXgTHCRIRWdU23yA9SbdxwgjVprr59uRbsgSNJPo0BwClnU7dn6xuQPMxXCmqCdZtkXV2HuxQW3TpMewEvGq2QKW40ErY8NaVwMaYWLia-cM0jDP6o2R6zAxID-UKtmdFywkwApSigzfZvLKwKjiPhKKVcxUalNvm_GtFUyGgjlXRIu_diVixsg0lltQWKpDj8Atx6fiiE_ppH1Wa5yBopHTyZVWzcrK48l4XXIJ0BjwH5EvdHhwjNIam8GvYhW-_H_ai1sU5GY1mv8fCgtdmGys2me3xp8tlw9v-JL3egu4jACaMX0XmxpcCj_m-_365-BsgX_HPLLPGSfqHgNhcs9Kbkgp3u15hyr8KGXqekxjCU50J9bPnb_3vfWuCitrLG2iV-jXORt5UnNY-G3k9d6gjtm7AAl3wjBI-YOVFM831d79RZjyZEvPHGN7NrmTtwfppUVlEYNmA.Meacvovt_C_0C8-UPEJPqg"
+  },
+  {
+    "domain": ".www.jamessuckling.com",
+    "expirationDate": 1803866767,
+    "hostOnly": false,
+    "httpOnly": false,
+    "name": "__stripe_mid",
+    "path": "/",
+    "sameSite": "strict",
+    "secure": true,
+    "session": false,
+    "storeId": null,
+    "value": "1c1ccf17-d42b-41cf-bf6b-117fc47a5aa95a0080"
+  }
+]

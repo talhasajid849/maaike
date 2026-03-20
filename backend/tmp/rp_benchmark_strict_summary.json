@@ -1,0 +1,23 @@
+{
+  "tested_rows": 98,
+  "elapsed_sec": 639.78,
+  "found_count": 40,
+  "found_pct": 40.82,
+  "found_with_note_count": 40,
+  "found_with_note_pct_of_found": 100.0,
+  "error_count": 0,
+  "expected_labeled_rows": 25,
+  "exact_url_match_count": 1,
+  "exact_url_match_pct_on_labeled": 4.0,
+  "name_match_count": 18,
+  "name_match_pct_on_labeled": 72.0,
+  "url_or_name_match_count": 19,
+  "url_or_name_match_pct_on_labeled": 76.0,
+  "TP": 21,
+  "FN": 4,
+  "FP": 19,
+  "TN": 54,
+  "precision_pct": 52.5,
+  "recall_pct": 84.0,
+  "accuracy_pct": 76.53
+}
