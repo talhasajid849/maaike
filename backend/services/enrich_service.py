@@ -22,6 +22,7 @@ from models.wine_model import (
     get_pending_wines, mark_not_found,
     upsert_reviews, count_pending, clear_wine_source_reviews,
 )
+from services.cookie_service import get_all_statuses
 from services.normalize_service import normalize_reviews, reset_note_tracking
 from services.session_service import get_session
 
@@ -64,7 +65,8 @@ def enrich_one(wine_id: int, name: str, vintage: str, lwin: str,
         if v.get("enabled") and (source_filter is None or k == source_filter)
     }
 
-    for source_key, cfg in sources_to_try.items():
+    source_items = list(sources_to_try.items())
+    for idx, (source_key, cfg) in enumerate(source_items):
         ss = state["source_stats"].setdefault(source_key, {
             "found": 0, "errors": 0, "skipped": 0, "no_session": 0
         })
@@ -101,7 +103,8 @@ def enrich_one(wine_id: int, name: str, vintage: str, lwin: str,
             logger.error(err_msg)
             _log(on_log, err_msg, "error", source_key)
 
-        time.sleep(sleep_sec * 0.3)
+        if idx < len(source_items) - 1:
+            time.sleep(sleep_sec * 0.3)
 
     if not found_any:
         mark_not_found(wine_id)
@@ -220,7 +223,7 @@ def start_batch(limit: int = 0, sleep_sec: float = 3.0,
         _log(on_log, f"Processing {len(wines)} wines…", "info", source_filter)
         _emit(on_progress)
 
-        for w in wines:
+        for idx, w in enumerate(wines):
             if state["stop_flag"]:
                 remaining = state["total"] - state["done"]
                 _log(on_log, f"⏹ Stopped by user. {remaining} wines remaining — re-run to continue.", "warn", source_filter)
@@ -248,7 +251,8 @@ def start_batch(limit: int = 0, sleep_sec: float = 3.0,
             state["done"]    += 1
             state["last_id"]  = w["id"]
             _emit(on_progress)
-            time.sleep(sleep_sec)
+            if idx < len(wines) - 1:
+                time.sleep(sleep_sec)
 
         # ── Summary ───────────────────────────────────────────────────────
         state.update({"running": False, "stop_flag": False})
@@ -287,6 +291,7 @@ def get_source_status() -> dict:
     Always returns at least one entry per source so the UI never gets stuck.
     """
     result = {}
+    cookie_statuses = get_all_statuses()
     for key, cfg in SOURCES.items():
         enabled = cfg.get("enabled", False)
         # Try to load session — but never block/raise here
@@ -294,10 +299,14 @@ def get_source_status() -> dict:
         if enabled:
             try:
                 session = get_session(key)
-            except Exception as e:
+            except (Exception, SystemExit) as e:
                 logger.warning("[%s] session check error: %s", key, e)
 
         ss = state["source_stats"].get(key, {})
+        ck = cookie_statuses.get(key, {}) if cfg.get("needs_cookies") else {}
+        session_message = None
+        if session is None:
+            session_message = ck.get("message") or ("No cookies" if cfg.get("needs_cookies") else None)
         result[key] = {
             "key":         key,
             "name":        cfg.get("name", key),
@@ -306,6 +315,7 @@ def get_source_status() -> dict:
             "color":       cfg.get("color", "#8b949e"),
             "enabled":     enabled,
             "has_session": session is not None,
+            "session_message": session_message,
             "found":       ss.get("found", 0),
             "errors":      ss.get("errors", 0),
             "skipped":     ss.get("skipped", 0),

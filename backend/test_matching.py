@@ -22,6 +22,17 @@ from openpyxl import Workbook
 
 # ── Import from both scrapers ──────────────────────────────────────────────────
 from sources.robertparker import _name_matches, _name_tokens, _build_rp_queries
+from sources.decanter import (
+    _candidate_review_pool as _dc_candidate_review_pool,
+    _build_search_queries as _build_dc_queries,
+    _direct_detail_urls as _dc_direct_detail_urls,
+    _manual_search_urls as _dc_manual_search_urls,
+    _matches_query as _dc_matches_query,
+    _openai_fallback_enabled as _dc_openai_fallback_enabled,
+    _parse_detail_page as _dc_parse_detail_page,
+    _preferred_query_name as _dc_preferred_query_name,
+    _sort_candidates as _dc_sort_candidates,
+)
 from maaike_phase1 import (
     _build_search_queries,
     _candidate_prerank_score,
@@ -175,6 +186,358 @@ check("xlsx parser strips trailing pack/year from name", parsed_rows[0].get("nam
 check("xlsx parser stores JR producer hint", parsed_rows[0].get("search_hints", {}).get("jr_producer") == "Ch La Fleur de Boüard", True)
 check("xlsx parser stores JR appellation hint", parsed_rows[0].get("search_hints", {}).get("jr_appellation") == "Lalande-de-Pomerol", True)
 check("xlsx parser stores RP URL hint", parsed_rows[0].get("search_hints", {}).get("rp_search_url") == "https://www.robertparker.com/wines/123456/test-slug", True)
+
+print("\n== 2d3. XLSX manual Decanter hint parsing ==")
+wb_dc = Workbook()
+ws_dc = wb_dc.active
+ws_dc.append([
+    "Publisher", "LWIN11", "Product_Name", "Vintage",
+    "Name on Decanter", "URL on Decanter search page", "URL on Decanter sperate wine page"
+])
+ws_dc.append(["Decanter", "Optional if Name set", "Optional if LWIN set", "YYYY or NV", "", "", ""])
+ws_dc.append([
+    "Decanter",
+    "10159552010",
+    "Chateau Trotanoy, Pomerol 2010",
+    "2010",
+    "Château Trotanoy, Espérance de Trotanoy, Pomerol, 2010",
+    "https://www.decanter.com/wine-reviews/search/term/chateau-trotanoy%2C-pomerol-2010/page/1/",
+    "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-trotanoy-esperance-de-trotanoy-pomerol-2010-30840/",
+])
+buf_dc = io.BytesIO()
+wb_dc.save(buf_dc)
+parsed_dc_rows = xlsx_mod.parse_xlsx(buf_dc.getvalue())
+check("xlsx parser keeps one Decanter data row", len(parsed_dc_rows) == 1, True)
+check("xlsx parser keeps Decanter raw product name", parsed_dc_rows[0].get("raw_name") == "Chateau Trotanoy, Pomerol 2010", True)
+check("xlsx parser stores Decanter wine-name hint", parsed_dc_rows[0].get("search_hints", {}).get("decanter_wine_name") == "Château Trotanoy, Espérance de Trotanoy, Pomerol, 2010", True)
+check("xlsx parser stores Decanter search URL hint", "wine-reviews/search/term/" in (parsed_dc_rows[0].get("search_hints", {}).get("decanter_search_url") or ""), True)
+check("xlsx parser stores Decanter detail URL hint", "chateau-trotanoy-esperance-de-trotanoy" in (parsed_dc_rows[0].get("search_hints", {}).get("decanter_review_url") or ""), True)
+check(
+    "Decanter ignores mismatched hinted wine name",
+    _dc_preferred_query_name(
+        "Pierre-Yves Colin-Morey, Chassagne-Montrachet 1er Cru, La Grande Montagne",
+        2015,
+        {"decanter_wine_name": "Bâtard-Montrachet Grand Cru 2015"},
+    ) == "Pierre-Yves Colin-Morey, Chassagne-Montrachet 1er Cru, La Grande Montagne",
+    True,
+)
+check(
+    "Decanter ignores mismatched hinted direct URL",
+    len(_dc_direct_detail_urls(
+        "Pierre-Yves Colin-Morey, Chassagne-Montrachet 1er Cru, La Grande Montagne",
+        2015,
+        {"decanter_review_url": "https://www.decanter.com/wine-reviews/france/burgundy/batard-montrachet-grand-cru-2015-99999/"},
+    )) == 0,
+    True,
+)
+check(
+    "Decanter ignores generic hinted direct URL when query vintage is specific",
+    len(_dc_direct_detail_urls(
+        "Le Clarence de Haut-Brion",
+        2018,
+        {"decanter_review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/le-clarence-de-haut-brion-99999/"},
+    )) == 0,
+    True,
+)
+check(
+    "Decanter keeps explicit direct URL typed in the query itself",
+    len(_dc_direct_detail_urls(
+        "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-trotanoy-esperance-de-trotanoy-pomerol-2010-30840/",
+        2010,
+        None,
+    )) == 1,
+    True,
+)
+check(
+    "Decanter ignores mismatched hinted search URL",
+    len(_dc_manual_search_urls(
+        "Domaine de la Romanée-Conti, La Tâche Grand Cru",
+        2004,
+        {"decanter_search_url": "https://www.decanter.com/wine-reviews/search/term/richebourg-grand-cru-2004/page/1/"},
+    )) == 0,
+    True,
+)
+
+print("\n== 2d4. Decanter query cleanup ==")
+dc_queries = _build_dc_queries("Chateau Figeac Premier Grand Cru Classe A, Saint-Emilion Grand Cru", 2006)
+check("Decanter keeps cleaned producer/appellation query", "Chateau Figeac, Saint-Emilion" in dc_queries, True)
+check("Decanter adds cleaned vintage query", "Chateau Figeac, Saint-Emilion 2006" in dc_queries, True)
+dc_queries_2 = _build_dc_queries("Chateau Latour-Martillac, Rouge Cru Classe, Pessac-Leognan", 2016)
+check("Decanter drops descriptor-only middle segment", "Chateau Latour-Martillac, Pessac-Leognan" in dc_queries_2, True)
+dc_queries_3 = _build_dc_queries("Chateau Malescot St. Exupery 3eme Cru Classe, Margaux", 2023)
+check("Decanter expands saint abbreviation variant", any("Saint Exupery" in q for q in dc_queries_3), True)
+dc_queries_4 = _build_dc_queries("Blason d'Issan, Margaux 2018 (Magnum)", 2018)
+check("Decanter strips bottle size from query variants", all("Magnum" not in q for q in dc_queries_4), True)
+check("Decanter avoids duplicate vintage after bottle-size cleanup", "Blason d'Issan, Margaux 2018 2018" not in dc_queries_4, True)
+dc_html = """
+<html><body>
+  <h1>Château Trotanoy, Espérance de Trotanoy, Pomerol, 2010</h1>
+  <div class="WineInfo_wineInfo__item__">
+    <div class="type__">Producer</div><div class="value__">Château Trotanoy</div>
+  </div>
+  <div class="WineInfo_wineInfo__item__">
+    <div class="type__">Appellation</div><div class="value__">Pomerol</div>
+  </div>
+  <script id="__NEXT_DATA__" type="application/json">
+    {"props":{"pageProps":{"wine":{"vintage":2020,"primary_tasting":{"rounded_score":90,"consolidated_review":"Structured and firm.","drink_from":2019,"drink_to":2030,"published_at":"2019-06-12T15:25:08+01:00","scores":[{"review":"Structured and firm.","score":90,"judge":{"name":"Jane Anson"}}],"tasting":{"start_date":"2019-06-08T00:00:00+01:00"}}}}}}
+  </script>
+</body></html>
+"""
+dc_parsed = _dc_parse_detail_page(dc_html, "https://www.decanter.com/wine-reviews/example")
+check("Decanter detail parser falls back to __NEXT_DATA__ score", dc_parsed.get("score_native") == 90, True)
+check("Decanter detail parser falls back to __NEXT_DATA__ note", dc_parsed.get("note") == "Structured and firm.", True)
+check("Decanter detail parser falls back to __NEXT_DATA__ reviewer", dc_parsed.get("reviewer") == "Jane Anson", True)
+check("Decanter detail parser falls back to __NEXT_DATA__ vintage", dc_parsed.get("vintage_src") == 2020, True)
+
+print("\n== 2d5. Decanter vintage guard ==")
+generic_dc_review = {
+    "wine_name_src": "Château Lynch-Moussas, Pauillac, Bordeaux, France",
+    "producer": "Château Lynch-Moussas",
+    "appellation": "Pauillac",
+    "region": "Bordeaux",
+    "country": "France",
+    "vintage_src": None,
+    "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-lynch-moussas-bordeaux-france-1009/",
+}
+check(
+    "Decanter rejects generic no-vintage page for vintage query",
+    _dc_matches_query("Chateau Lynch-Moussas 5eme Cru Classe, Pauillac", 2021, generic_dc_review),
+    False,
+)
+check(
+    "Decanter still trusts explicit direct URLs when vintage is missing on page",
+    _dc_matches_query(
+        "Chateau Lynch-Moussas 5eme Cru Classe, Pauillac",
+        2021,
+        generic_dc_review,
+        direct_url="https://www.decanter.com/wine-reviews/france/bordeaux/chateau-lynch-moussas-bordeaux-france-1009/",
+        allow_missing_vintage=True,
+    ),
+    True,
+)
+check(
+    "Decanter direct URLs still reject a different producer",
+    _dc_matches_query(
+        "Chateau Dassault, Saint-Emilion Grand Cru",
+        2020,
+        {
+            "wine_name_src": "Chateau Fombrauge, St-Emilion Grand Cru 2020",
+            "producer": "Chateau Fombrauge",
+            "appellation": "St-Emilion",
+            "vintage_src": 2020,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-fombrauge-st-emilion-grand-cru-2020-99999/",
+        },
+        direct_url="https://www.decanter.com/wine-reviews/france/bordeaux/chateau-fombrauge-st-emilion-grand-cru-2020-99999/",
+        allow_missing_vintage=True,
+    ),
+    False,
+)
+check(
+    "Decanter direct URLs reject same producer when appellation drifts",
+    _dc_matches_query(
+        "Chateau Margaux, Margaux",
+        2020,
+        {
+            "wine_name_src": "Chateau Margaux, St-Emilion Grand Cru 2020",
+            "producer": "Chateau Margaux",
+            "appellation": "St-Emilion",
+            "vintage_src": 2020,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-margaux-st-emilion-grand-cru-2020-99998/",
+        },
+        direct_url="https://www.decanter.com/wine-reviews/france/bordeaux/chateau-margaux-st-emilion-grand-cru-2020-99998/",
+        allow_missing_vintage=True,
+    ),
+    False,
+)
+check(
+    "Decanter direct URLs reject rouge-vs-blanc mismatches",
+    _dc_matches_query(
+        "Domaine de Chevalier, Rouge, Pessac-Leognan",
+        2020,
+        {
+            "wine_name_src": "Domaine de Chevalier, Blanc, Pessac-Leognan 2020",
+            "producer": "Domaine de Chevalier",
+            "appellation": "Pessac-Leognan",
+            "colour": "white",
+            "vintage_src": 2020,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/domaine-de-chevalier-blanc-pessac-leognan-2020-99997/",
+        },
+        direct_url="https://www.decanter.com/wine-reviews/france/bordeaux/domaine-de-chevalier-blanc-pessac-leognan-2020-99997/",
+        allow_missing_vintage=True,
+    ),
+    False,
+)
+
+print("\n== 2d6. Decanter candidate ordering ==")
+ordered = _dc_sort_candidates([
+    {"title": "Chateau Lafaurie-Peyraguey, Sauternes, 1er Cru Classe, 2009", "url": "https://example.test/2009", "vintage": 2009, "rank_score": 99},
+    {"title": "Chateau Lafaurie-Peyraguey, Sauternes, 1er Cru Classe, 2016", "url": "https://example.test/2016", "vintage": 2016, "rank_score": 70},
+], 2016)
+check("Decanter prefers exact-vintage candidate over higher-score wrong vintage", ordered[0].get("vintage") == 2016, True)
+pool = _dc_candidate_review_pool([
+    {"title": f"Wine {i}", "url": f"https://example.test/{i}", "vintage": 2010, "rank_score": 100 - i}
+    for i in range(12)
+], 2010)
+check("Decanter review pool checks deeper than the old top-8 limit", len(pool) == 12, True)
+check(
+    "Decanter accepts detail-page facts when title omits appellation",
+    _dc_matches_query(
+        "Chateau Trotanoy, Pomerol",
+        2010,
+        {
+            "wine_name_src": "Château Trotanoy, Espérance de Trotanoy, Bordeaux, France, 2010",
+            "producer": "Château Trotanoy",
+            "appellation": "Pomerol",
+            "region": "Bordeaux",
+            "country": "France",
+            "vintage_src": 2010,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-trotanoy-esperance-de-trotanoy-pomerol-2010-30840/",
+        },
+    ),
+    True,
+)
+check(
+    "Decanter treats accented producer and extra subtitle words as same identity",
+    _dc_matches_query(
+        "Chateau Trotanoy, Pomerol",
+        2010,
+        {
+            "wine_name_src": "Château Trotanoy, Espérance de Trotanoy, Bordeaux, France, 2010",
+            "vintage_src": 2010,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-trotanoy-esperance-de-trotanoy-pomerol-2010-30840/",
+            "producer": "Château Trotanoy",
+            "appellation": "Pomerol",
+        },
+    ),
+    True,
+)
+check(
+    "Decanter rejects named-estate neighbour with extra producer token",
+    _dc_matches_query(
+        "Chateau Grand Corbin, Saint-Emilion Grand Cru",
+        2018,
+        {
+            "wine_name_src": "Château Grand Corbin Despagne, St-Émilion, Grand Cru Classé, 2018",
+            "producer": "Château Grand Corbin Despagne",
+            "appellation": "St-Émilion",
+            "vintage_src": 2018,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-grand-corbin-despagne-st-emilion-grand-cru-classe-44780/",
+        },
+    ),
+    False,
+)
+check(
+    "Decanter rejects red-vs-white confusion when colour sits inside descriptor segment",
+    _dc_matches_query(
+        "Domaine de Chevalier, Rouge Cru Classe, Pessac-Leognan",
+        2015,
+        {
+            "wine_name_src": "Domaine de Chevalier, Blanc, Pessac-Léognan Cru Classé de Graves, Bordeaux, France 2015",
+            "producer": "Domaine de Chevalier",
+            "appellation": "Pessac-Léognan",
+            "colour": "white",
+            "vintage_src": 2015,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/domaine-de-chevalier-blanc-pessac-leognan-cru-classe-de-102661/",
+        },
+    ),
+    False,
+)
+check(
+    "Decanter rejects parent wine when query is a second label",
+    _dc_matches_query(
+        "La Reserve de Leoville Barton, Saint-Julien",
+        2020,
+        {
+            "wine_name_src": "Château Léoville Barton, St-Julien, 2ème Cru Classé, Bordeaux, France 2020",
+            "producer": "Château Léoville Barton",
+            "appellation": "St-Julien",
+            "vintage_src": 2020,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-leoville-barton-st-julien-2eme-cru-classe-2020-48335/",
+        },
+    ),
+    False,
+)
+check(
+    "Decanter rejects second wine when title carries hidden sub-label",
+    _dc_matches_query(
+        "Chateau Figeac Premier Grand Cru Classe A, Saint-Emilion Grand Cru",
+        2018,
+        {
+            "wine_name_src": "Château Figeac, Petit Figeac, St-Émilion, Grand Cru, Bordeaux, France 2018",
+            "producer": "Château Figeac",
+            "appellation": "St-Émilion",
+            "region": "Bordeaux",
+            "country": "France",
+            "vintage_src": 2018,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-figeac-petit-figeac-st-emilion-grand-cru-2018-71139/",
+        },
+    ),
+    False,
+)
+check(
+    "Decanter rejects classification letter mismatches",
+    _dc_matches_query(
+        "Chateau Figeac Premier Grand Cru Classe A, Saint-Emilion Grand Cru",
+        2018,
+        {
+            "wine_name_src": "Château Figeac, St-Émilion, 1er Grand Cru Classé B 2018",
+            "producer": "Château Figeac",
+            "appellation": "St-Émilion",
+            "vintage_src": 2018,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/chateau-figeac-st-emilion-1er-grand-cru-classe-b-2018-29430/",
+        },
+    ),
+    False,
+)
+check(
+    "Decanter ignores bottle-size suffixes during final match checks",
+    _dc_matches_query(
+        "Petrus, Pomerol 2008 (Magnum)",
+        2008,
+        {
+            "wine_name_src": "Petrus, Pomerol, Bordeaux, France, 2008",
+            "producer": "Petrus",
+            "appellation": "Pomerol",
+            "vintage_src": 2008,
+            "review_url": "https://www.decanter.com/wine-reviews/france/bordeaux/petrus-pomerol-bordeaux-france-2008-18360/",
+        },
+    ),
+    True,
+)
+check(
+    "Decanter rejects producer-overlap hit when appellation drifts",
+    _dc_matches_query(
+        "Chateau Moulin a Vent, Moulis en Medoc",
+        2016,
+        {
+            "wine_name_src": "Chateau du Moulin-a-Vent, Moulin-a-Vent, Beaujolais 2016",
+            "producer": "Chateau du Moulin-a-Vent",
+            "appellation": "Moulin-a-Vent",
+            "region": "Beaujolais",
+            "country": "France",
+            "vintage_src": 2016,
+            "review_url": "https://www.decanter.com/wine-reviews/france/burgundy/chateau-du-moulin-a-vent-beaujolais-moulin-a-vent-2016-62348/",
+        },
+    ),
+    False,
+)
+old_openai_key = os.environ.get("OPENAI_API_KEY")
+old_dc_openai = os.environ.get("DECANTER_OPENAI_FALLBACK")
+try:
+    os.environ["OPENAI_API_KEY"] = "test-key"
+    os.environ.pop("DECANTER_OPENAI_FALLBACK", None)
+    check("Decanter OpenAI fallback auto-enables when key exists", _dc_openai_fallback_enabled(), True)
+    os.environ["DECANTER_OPENAI_FALLBACK"] = "0"
+    check("Decanter OpenAI fallback still honours explicit disable flag", _dc_openai_fallback_enabled(), False)
+finally:
+    if old_openai_key is None:
+        os.environ.pop("OPENAI_API_KEY", None)
+    else:
+        os.environ["OPENAI_API_KEY"] = old_openai_key
+    if old_dc_openai is None:
+        os.environ.pop("DECANTER_OPENAI_FALLBACK", None)
+    else:
+        os.environ["DECANTER_OPENAI_FALLBACK"] = old_dc_openai
 
 print("\n══ 2e. JR plausible-match fallback (_jr_plausible_match) ════════════════")
 check(

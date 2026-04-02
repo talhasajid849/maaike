@@ -189,12 +189,23 @@ export default function Settings() {
 
 function CookieStatusCard({ ck }) {
   if (!ck) return <div className="text-text3 text-sm">Loading…</div>;
-  const isOk = ck.ok && (ck.days_remaining ?? 99) > 5;
+  const remainingDays = ck.days_remaining;
+  const remainingHours = ck.hours_remaining;
+  const statusText =
+    typeof remainingDays === 'number' && remainingDays > 0
+      ? `${remainingDays} days remaining`
+      : typeof remainingHours === 'number'
+        ? `${remainingHours} hours remaining`
+        : `${remainingDays ?? 'unknown'} days remaining`;
+  const isOk = ck.ok && (
+    (typeof remainingDays === 'number' && remainingDays > 5) ||
+    (typeof remainingDays !== 'number' && typeof remainingHours === 'number' && remainingHours > 120)
+  );
   return ck.ok ? (
     <>
       <div className={`flex items-center gap-2 text-sm px-3 py-2 rounded border mb-3
         ${isOk ? 'bg-green/10 border-green text-green' : 'bg-yellow/10 border-yellow text-yellow'}`}>
-        {isOk ? '✓' : '⚠'} JWT valid — {ck.days_remaining} days remaining
+        {isOk ? '✓' : '⚠'} JWT valid — {statusText}
       </div>
       <div className="text-xs text-text2 leading-loose">
         {ck.is_member !== undefined    && <InfoRow label="Member"        value={ck.is_member ? 'Yes' : 'No'} />}
@@ -205,6 +216,7 @@ function CookieStatusCard({ ck }) {
             color={ck.has_session ? 'text-green' : 'text-red'} />
         )}
         {ck.user_id && <InfoRow label="User ID" value={ck.user_id} />}
+        {ck.expires_at && <InfoRow label="Expires at (UTC)" value={ck.expires_at} />}
         <InfoRow label="Cookies loaded" value={ck.cookie_count} />
       </div>
     </>

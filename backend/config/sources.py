@@ -7,7 +7,7 @@ Think of this like your Express config/sources.js
 To add a new source:
   1. Add entry here
   2. Drop sources/<key>.py with load_session() + search_wine()
-  3. That's it — everything else picks it up automatically
+  3. That's it - everything else picks it up automatically
 
 Each source must have these fields:
   key          - internal ID (matches filename in sources/)
@@ -15,7 +15,7 @@ Each source must have these fields:
   short        - badge label (JR, RP, JS, DC)
   scale        - native score scale (20 or 100)
   color        - hex color for UI badge
-  icon         - emoji
+  icon         - display token for UI
   url          - website
   enabled      - bool
   needs_cookies- bool
@@ -30,7 +30,7 @@ SOURCES = {
         "short":        "JR",
         "scale":        20,
         "color":        "#00bfa5",
-        "icon":         "🍷",
+        "icon":         "JR",
         "url":          "https://www.jancisrobinson.com",
         "enabled":      True,
         "needs_cookies": True,
@@ -43,7 +43,7 @@ SOURCES = {
         "short":        "RP",
         "scale":        100,
         "color":        "#A0843A",
-        "icon":         "⭐",
+        "icon":         "RP",
         "url":          "https://www.robertparker.com",
         "enabled":      True,
         "needs_cookies": True,
@@ -56,38 +56,24 @@ SOURCES = {
         "short":        "JS",
         "scale":        100,
         "color":        "#C0392B",
-        "icon":         "ðŸ†",
+        "icon":         "JS",
         "url":          "https://www.jamessuckling.com",
         "enabled":      True,
         "needs_cookies": True,
         "cookie_file":  "cookies/jamessuckling.json",
         "sleep_sec":    3.0,
     },
-    # Uncomment when ready:
-    # "jamessuckling": {
-    #     "key":          "jamessuckling",
-    #     "name":         "James Suckling",
-    #     "short":        "JS",
-    #     "scale":        100,
-    #     "color":        "#C0392B",
-    #     "icon":         "🏆",
-    #     "url":          "https://www.jamessuckling.com",
-    #     "enabled":      False,
-    #     "needs_cookies": True,
-    #     "cookie_file":  "cookies/jamessuckling.json",
-    #     "sleep_sec":    3.0,
-    # },
-    # "decanter": {
-    #     "key":          "decanter",
-    #     "name":         "Decanter",
-    #     "short":        "DC",
-    #     "scale":        100,
-    #     "color":        "#1B1B1B",
-    #     "icon":         "📰",
-    #     "url":          "https://www.decanter.com",
-    #     "enabled":      False,
-    #     "needs_cookies": True,
-    #     "cookie_file":  "cookies/decanter.json",
-    #     "sleep_sec":    5.0,
-    # },
+    "decanter": {
+        "key":          "decanter",
+        "name":         "Decanter",
+        "short":        "DC",
+        "scale":        100,
+        "color":        "#1B4F72",
+        "icon":         "DC",
+        "url":          "https://www.decanter.com",
+        "enabled":      True,
+        "needs_cookies": True,
+        "cookie_file":  "cookies/decanter.json",
+        "sleep_sec":    2.0,
+    },
 }

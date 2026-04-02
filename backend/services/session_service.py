@@ -80,7 +80,7 @@ def _load_jr_session(cookie_path: Path):
         _cache["jancisrobinson"] = session
         logger.info("[jancisrobinson] session loaded")
         return session
-    except Exception as e:
+    except (Exception, SystemExit) as e:
         logger.error("[jancisrobinson] session failed: %s", e)
         return None
 

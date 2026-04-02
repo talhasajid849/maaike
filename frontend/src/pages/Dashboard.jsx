@@ -162,6 +162,7 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
 
   async function runProbeSearch() {
     const needsJsHint = sourceKey === 'jamessuckling';
+    const needsDecanterHint = sourceKey === 'decanter';
     const liveProbeName = (probeNameRef.current?.value ?? probeName).trim();
     const liveProbeVintage = (probeVintageRef.current?.value ?? probeVintage).trim();
     const liveProbeLwin = (probeLwinRef.current?.value ?? probeLwin).trim();
@@ -183,7 +184,12 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
     }
 
     if (!liveProbeName && !liveProbeJsUrl && !liveProbeJsId) {
-      addToast(`[${cfg?.short}] Enter wine name or a James Suckling URL/ID`, 'warn');
+      const helper = needsJsHint
+        ? 'wine name or a James Suckling URL/ID'
+        : needsDecanterHint
+          ? 'wine name or a Decanter URL'
+          : 'a wine name';
+      addToast(`[${cfg?.short}] Enter ${helper}`, 'warn');
       return;
     }
     const nameYear = extractYear(liveProbeName);
@@ -200,10 +206,16 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
     setProbeError('');
     setProbeResults([]);
     try {
-      const search_hints = needsJsHint ? {
-        jamessuckling_url: liveProbeJsUrl,
-        js_tasting_note_id: liveProbeJsId,
-      } : undefined;
+      const search_hints = needsJsHint
+        ? {
+            jamessuckling_url: liveProbeJsUrl,
+            js_tasting_note_id: liveProbeJsId,
+          }
+        : needsDecanterHint
+          ? {
+              decanter_url: liveProbeJsUrl,
+            }
+          : undefined;
       const d = await enrichApi.testSearch({
         source: sourceKey,
         name: liveProbeName,
@@ -229,6 +241,7 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const hasSession = status?.has_session;
+  const sessionMessage = status?.session_message;
   const hitRate    = progress.done > 0 ? Math.round(progress.found / progress.done * 100) : null;
   const isBlocked  = globalRunning && !running;
 
@@ -268,7 +281,7 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
                 </span>
               : <span className="flex items-center gap-1 text-xs font-semibold text-red-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
-                  No cookies
+                  {sessionMessage || 'No cookies'}
                 </span>
           }
 
@@ -420,6 +433,11 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
                 James Suckling can now search by wine name and will choose the latest matching tasting date. A direct tasting-note URL or note ID is still the most precise option, and you can paste multiple URLs or IDs separated by commas.
               </div>
             )}
+            {sourceKey === 'decanter' && (
+              <div className="text-2xs text-amber-300 mb-2">
+                Decanter can search by wine name and also accepts a Decanter search URL or direct review URL for precision checks.
+              </div>
+            )}
             <div className="flex flex-wrap gap-2 items-end mb-2">
               <FormField label="Wine name" className="flex-1" style={{ minWidth: 250 }}>
                 <input
@@ -453,14 +471,22 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
                   style={{ width: 130 }}
                 />
               </FormField>
-              {sourceKey === 'jamessuckling' && (
-                <FormField label="JS URL" className="flex-1" style={{ minWidth: 280 }}>
+              {(sourceKey === 'jamessuckling' || sourceKey === 'decanter') && (
+                <FormField
+                  label={sourceKey === 'jamessuckling' ? 'JS URL' : 'Decanter URL'}
+                  className="flex-1"
+                  style={{ minWidth: 280 }}
+                >
                   <input
                     type="text"
                     ref={probeJsUrlRef}
                     value={probeJsUrl}
                     onChange={e => setProbeJsUrl(e.target.value)}
-                    placeholder="https://www.jamessuckling.com/tasting-notes/20113/..."
+                    placeholder={
+                      sourceKey === 'jamessuckling'
+                        ? 'https://www.jamessuckling.com/tasting-notes/20113/...'
+                        : 'https://www.decanter.com/wine-reviews/...'
+                    }
                     className={inputCls}
                   />
                 </FormField>

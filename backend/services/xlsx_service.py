@@ -50,6 +50,9 @@ _ALIASES: Dict[str, List[str]] = {
     "rp_search_url": ["rp_search_url", "url_on_the_rp", "rp_url"],
     "js_search_url": ["js_search_url", "jamessuckling_url", "url_on_the_js", "url_on_the_james_suckling", "js_url"],
     "js_tasting_note_id": ["js_tasting_note_id", "jamessuckling_id", "tasting_note_id_on_js", "js_id"],
+    "dc_wine_name": ["dc_wine_name", "decanter_wine_name", "name_on_decanter"],
+    "dc_search_url": ["dc_search_url", "decanter_search_url", "url_on_decanter_search_page"],
+    "dc_review_url": ["dc_review_url", "decanter_review_url", "url_on_decanter_sperate_wine_page", "url_on_decanter_separate_wine_page"],
     "critic":      ["critic_name", "critic", "reviewer", "taster"],
     "score":       ["score"],
     "drink_from":  ["drink_fro", "drink_from", "from"],
@@ -108,6 +111,9 @@ def parse_xlsx(file_bytes: bytes) -> List[Dict]:
     rp_search_url_col = _col_idx(raw_headers, "rp_search_url")
     js_search_url_col = _col_idx(raw_headers, "js_search_url")
     js_tasting_note_id_col = _col_idx(raw_headers, "js_tasting_note_id")
+    dc_wine_name_col = _col_idx(raw_headers, "dc_wine_name")
+    dc_search_url_col = _col_idx(raw_headers, "dc_search_url")
+    dc_review_url_col = _col_idx(raw_headers, "dc_review_url")
 
     def cell(row, col):
         if col is None or col >= len(row) or row[col] is None:
@@ -136,6 +142,9 @@ def parse_xlsx(file_bytes: bytes) -> List[Dict]:
         rp_search_url = cell(row, rp_search_url_col)
         js_search_url = cell(row, js_search_url_col)
         js_tasting_note_id = cell(row, js_tasting_note_id_col)
+        dc_wine_name = cell(row, dc_wine_name_col)
+        dc_search_url = cell(row, dc_search_url_col)
+        dc_review_url = cell(row, dc_review_url_col)
         row_vals = [cell(row, i) for i in range(len(raw_headers))]
 
         if is_instruction_row(row_vals):
@@ -166,11 +175,16 @@ def parse_xlsx(file_bytes: bytes) -> List[Dict]:
         wine = {
             "row_idx": row_idx_1b,
             "name":    name_clean,
+            "raw_name": name_raw,
             "vintage": vintage,
             "lwin":    lwin,
             "lwin7":   lwin7,
         }
-        if jr_search_url or jr_wine_name or jr_producer or jr_appellation or rp_search_url or js_search_url or js_tasting_note_id:
+        if (
+            jr_search_url or jr_wine_name or jr_producer or jr_appellation
+            or rp_search_url or js_search_url or js_tasting_note_id
+            or dc_wine_name or dc_search_url or dc_review_url
+        ):
             wine["search_hints"] = {
                 "jr_search_url": jr_search_url,
                 "jr_wine_name": jr_wine_name,
@@ -179,6 +193,9 @@ def parse_xlsx(file_bytes: bytes) -> List[Dict]:
                 "rp_search_url": rp_search_url,
                 "jamessuckling_url": js_search_url,
                 "js_tasting_note_id": js_tasting_note_id,
+                "decanter_wine_name": dc_wine_name,
+                "decanter_search_url": dc_search_url,
+                "decanter_review_url": dc_review_url,
             }
         wines.append(wine)
 
@@ -306,6 +323,16 @@ def fill_xlsx(template_bytes: bytes, results: List[Dict]) -> bytes:
 
 _jobs: Dict[str, dict] = {}
 _lock = threading.Lock()
+
+
+def _format_progress_label(search_name: str, vintage: str) -> str:
+    text = str(search_name or "").strip()
+    year = str(vintage or "").strip()
+    if not year:
+        return text
+    if re.search(rf"\b{re.escape(year)}\b", text):
+        return text
+    return f"{text} {year}".strip()
 
 
 def create_job(
@@ -494,18 +521,19 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
             break
 
         name = wine["name"]
+        search_name = wine.get("raw_name") if source_key == "decanter" and wine.get("raw_name") else name
         vintage = wine["vintage"]
         lwin = wine["lwin"]
 
-        log(f"[{idx}/{len(wines)}] {name} {vintage or 'NV'}")
+        log(f"[{idx}/{len(wines)}] {_format_progress_label(search_name, vintage or 'NV')}")
 
         try:
             if source_key == "jancisrobinson":
                 from maaike_phase1 import search_wine
-                reviews = search_wine(session, name, vintage, lwin, wine.get("search_hints"))
+                reviews = search_wine(session, search_name, vintage, lwin, wine.get("search_hints"))
             else:
                 from services.enrich_service import _search_source
-                reviews = _search_source(source_key, session, name, vintage, lwin, sleep_sec, wine.get("search_hints"))
+                reviews = _search_source(source_key, session, search_name, vintage, lwin, sleep_sec, wine.get("search_hints"))
 
             if reviews:
                 consecutive_net_errors = 0
