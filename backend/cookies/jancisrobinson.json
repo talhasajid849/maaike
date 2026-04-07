@@ -1,93 +1,115 @@
 [
   {
+    "name": "mcforms-20191804-sessionId",
+    "value": "\"84f45abc-1df1-4cc8-9cfd-6484877c7b4c\"",
+    "domain": "www.jancisrobinson.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false
+  },
+  {
     "name": "_gcl_au",
-    "value": "1.1.48754623.1771518660",
+    "value": "1.1.322459812.1775306565",
     "domain": ".jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
+    "expires": 1783082565,
+    "httpOnly": false,
+    "secure": false
   },
   {
     "name": "_ga",
-    "value": "GA1.1.1965847418.1771518660",
+    "value": "GA1.1.589289465.1775306565",
     "domain": ".jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
+    "expires": 1809868396.569281,
+    "httpOnly": false,
+    "secure": false
   },
   {
     "name": "jr_session_id",
-    "value": "1965847418.1771518660_1771518659",
+    "value": "589289465.1775306565_1775306564",
     "domain": ".jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
+    "expires": -1,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Lax"
   },
   {
     "name": "usprivacy",
     "value": "1---",
-    "domain": ".jancisrobinson.com",
+    "domain": "www.jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
+    "expires": 1806844396,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
   },
   {
     "name": "_fbp",
-    "value": "fb.1.1771518660514.758810455825816499",
+    "value": "fb.1.1775306565455.525351444386865459",
     "domain": ".jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
-  },
-  {
-    "name": "mcforms-20191804-sessionId",
-    "value": "\"fc627a77-7a6e-4fd5-8001-e8210e80d05f\"",
-    "domain": ".jancisrobinson.com",
-    "path": "/",
-    "sameSite": "lax"
+    "expires": 1783084396,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
   },
   {
     "name": "__stripe_mid",
-    "value": "cef39bf5-44ce-4c32-9e9e-a3984f676caff00097",
-    "domain": ".jancisrobinson.com",
+    "value": "274264d8-e00b-493d-a93f-bd86261da87b39e5ae",
+    "domain": ".www.jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
+    "expires": 1806842567,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Strict"
   },
   {
-    "name": "__stripe_sid",
-    "value": "c49de9a6-f191-4ed8-8fe9-4305ffefaad8ef6581",
-    "domain": ".jancisrobinson.com",
+    "name": "SSESSe9e03b6489331a1d7bedcf638eca2d24",
+    "value": "NjzhWHwzAT5qgnW%2CYvb8C4LN8gtFfLCS6hEfJaZ1GL064Gu9",
+    "domain": ".www.jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
+    "expires": 1777898575.361912,
+    "httpOnly": true,
+    "secure": true
   },
   {
     "name": "jr_is_mailchimp_subscriber",
     "value": "1",
-    "domain": ".jancisrobinson.com",
+    "domain": "www.jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
+    "expires": 1806844403.261808,
+    "httpOnly": false,
+    "secure": true
   },
   {
     "name": "jrAccessRole",
-    "value": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJvZmZpY2VAcnVlcGluYXJkLmNvbSIsInN1YiI6Im9mZmljZUBydWVwaW5hcmQuY29tIiwiYXVkIjoiaHR0cHM6Ly9pZGVudGl0eXRvb2xraXQuZ29vZ2xlYXBpcy5jb20vZ29vZ2xlLmlkZW50aXR5LmlkZW50aXR5dG9vbGtpdC52MS5JZGVudGl0eVRvb2xraXQiLCJpYXQiOjE3NzE1MjAwNDQsImV4cCI6MTc3NDExMjA0NCwidmFsaWQiOnRydWUsImlzTWVtYmVyIjp0cnVlLCJjYW5BY2Nlc3NUYXN0aW5nTm90ZXMiOnRydWUsImRydXBhbCI6eyJ1aWQiOiIxMDE0MjkiLCJyb2xlcyI6WyJhdXRoZW50aWNhdGVkIiwidGllcl9tZW1iZXIiXX19.EVpvG4YsLz5i-wjLqND5qXMpmgVAsO1JM3yMIDFEpjY",
-    "domain": ".jancisrobinson.com",
+    "value": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJvZmZpY2VAcnVlcGluYXJkLmNvbSIsInN1YiI6Im9mZmljZUBydWVwaW5hcmQuY29tIiwiYXVkIjoiaHR0cHM6Ly9pZGVudGl0eXRvb2xraXQuZ29vZ2xlYXBpcy5jb20vZ29vZ2xlLmlkZW50aXR5LmlkZW50aXR5dG9vbGtpdC52MS5JZGVudGl0eVRvb2xraXQiLCJpYXQiOjE3NzUzMDgzMTgsImV4cCI6MTc3NzkwMDMxOCwidmFsaWQiOnRydWUsImlzTWVtYmVyIjp0cnVlLCJjYW5BY2Nlc3NUYXN0aW5nTm90ZXMiOnRydWUsImRydXBhbCI6eyJ1aWQiOiIxMDE0MjkiLCJyb2xlcyI6WyJ0aWVyX21lbWJlciJdfX0.rad-GFxKI85d-KGc7xvKY6SXNtY30RuFSDv8kiSJpp8",
+    "domain": "www.jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
-  },
-  {
-    "name": "OptanonConsent",
-    "value": "isGpcEnabled=0&datestamp=Thu+Feb+19+2026+22%3A04%3A08+GMT%2B0500+(Pakistan+Standard+Time)&version=202601.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&landingPath=NotLandingPage&groups=C0002%3A1%2CC0001%3A1%2CC0003%3A1%2CC0004%3A1&AwaitingReconsent=false",
-    "domain": ".jancisrobinson.com",
-    "path": "/",
-    "sameSite": "lax"
+    "expires": 1777900319.869776,
+    "httpOnly": false,
+    "secure": false
   },
   {
     "name": "_ga_H7X3XC11JN",
-    "value": "GS2.1.s1771518659$o1$g1$t1771520647$j60$l0$h0",
+    "value": "GS2.1.s1775306564$o1$g1$t1775308396$j60$l0$h0",
     "domain": ".jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
+    "expires": 1809868396.568664,
+    "httpOnly": false,
+    "secure": false
   },
   {
-    "name": "SSESSe9e03b6489331a1d7bedcf638eca2d24",
-    "value": "rXYAkTW2eAWANaE5n8SB1i95fMbPCELZz7eTTP0Mz0jBvzjB",
-    "domain": ".www.jancisrobinson.com",
+    "name": "OptanonConsent",
+    "value": "isGpcEnabled=0&datestamp=Sat+Apr+04+2026+06%3A13%3A16+GMT-0700+(Pacific+Daylight+Time)&version=202601.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&landingPath=NotLandingPage&groups=C0002%3A1%2CC0001%3A1%2CC0003%3A1%2CC0004%3A1&AwaitingReconsent=false",
+    "domain": ".jancisrobinson.com",
     "path": "/",
-    "sameSite": "lax"
+    "expires": 1806844396,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
   }
 ]

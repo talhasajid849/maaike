@@ -18,7 +18,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 
-import requests
+try:
+    from curl_cffi import requests
+    _CFFI = True
+except ImportError:
+    import requests
+    _CFFI = False
 from bs4 import BeautifulSoup
 
 JR_ORIGIN  = "https://www.jancisrobinson.com"
@@ -47,9 +52,95 @@ MATCH_RELAXED_COVERAGE = float(os.environ.get("MATCH_RELAXED_COVERAGE", "0.55"))
 MATCH_LEAD_WINE_FALLBACK_COVERAGE = float(os.environ.get("MATCH_LEAD_WINE_FALLBACK_COVERAGE", "0.75"))
 
 
+class JRAccessBlockedError(RuntimeError):
+    """Raised when JR/Cloudflare blocks scraper requests."""
+
+
 def _jr_debug(msg: str) -> None:
     if JR_DEBUG_SEARCH:
         print(f"    [JR DEBUG] {msg}")
+
+
+def _looks_textual(content_type: str, raw: bytes) -> bool:
+    ct = (content_type or "").lower()
+    if any(token in ct for token in ("json", "text/", "html", "xml", "javascript")):
+        return True
+    if not raw:
+        return True
+    sample = raw[:120]
+    printable = sum(1 for b in sample if b in (9, 10, 13) or 32 <= b <= 126)
+    return printable >= max(1, int(len(sample) * 0.85))
+
+
+def _response_preview(resp: Optional[requests.Response], limit: int = 200) -> str:
+    if resp is None:
+        return ""
+
+    content_type = (resp.headers.get("Content-Type") or "").strip()
+    content_encoding = (resp.headers.get("Content-Encoding") or "").strip()
+    raw = resp.content or b""
+
+    if not _looks_textual(content_type, raw):
+        details = [f"{len(raw)} bytes"]
+        if content_type:
+            details.append(f"content-type={content_type}")
+        if content_encoding:
+            details.append(f"content-encoding={content_encoding}")
+        return "<non-text response: " + ", ".join(details) + ">"
+
+    try:
+        text = resp.text or ""
+    except Exception:
+        text = raw.decode("utf-8", errors="replace")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
+
+
+def _http_error_summary(resp: Optional[requests.Response]) -> str:
+    if resp is None:
+        return "request failed without an HTTP response"
+
+    status = resp.status_code
+    preview = _response_preview(resp)
+    if status == 403:
+        cookie_header = ""
+        try:
+            cookie_header = (resp.request.headers.get("Cookie") or "") if resp.request is not None else ""
+        except Exception:
+            cookie_header = ""
+        hints = [
+            "JR search endpoint rejected the session",
+            "check fresh cookies in backend/cookies/jancisrobinson.json",
+        ]
+        if "SESS" not in cookie_header.upper():
+            hints.append("Drupal session cookie may be missing")
+        if preview:
+            hints.append(f"body={preview}")
+        return "; ".join(hints)
+    return preview or "HTTP request failed"
+
+
+def _is_cloudflare_challenge_text(text: str) -> bool:
+    sample = (text or "").lower()
+    return (
+        "just a moment" in sample
+        or "cf-chl-" in sample
+        or "cf-browser-verification" in sample
+        or "cloudflare" in sample
+        or "attention required" in sample
+    )
+
+
+def _raise_if_cloudflare_block(resp: Optional[requests.Response], context: str = "JR") -> None:
+    if resp is None:
+        return
+    status = int(getattr(resp, "status_code", 0) or 0)
+    preview = _response_preview(resp, limit=400)
+    if status == 403 and _is_cloudflare_challenge_text(preview):
+        raise JRAccessBlockedError(
+            f"{context} blocked by Cloudflare challenge; refresh JR cookies with cf_clearance from a real browser session"
+        )
 
 # â”€â”€â”€ JWT Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -121,7 +212,7 @@ def load_session(cookie_path: str = "real_cookies.json") -> requests.Session:
     if days < 0:
         raise SystemExit("JWT expired. Refresh cookies from browser.")
 
-    s = requests.Session()
+    s = requests.Session(impersonate="chrome124") if _CFFI else requests.Session()
     for c in cookies:
         n = c.get("name"); v = c.get("value")
         d = c.get("domain") or ".jancisrobinson.com"
@@ -133,7 +224,7 @@ def load_session(cookie_path: str = "real_cookies.json") -> requests.Session:
     s.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/132.0.0.0 Safari/537.36",
         "Accept": "application/json",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "en-US,en;q=0.9",
         "Origin": JR_ORIGIN,
         "Referer": JR_ORIGIN + "/tastings",
@@ -1232,7 +1323,8 @@ def _do_msearch(session: requests.Session, payload: str) -> List[Dict]:
             break
         except requests.HTTPError as e:
             status = e.response.status_code if e.response is not None else 0
-            body = (e.response.text[:200] if e.response is not None else str(e)) if e else ""
+            _raise_if_cloudflare_block(e.response, "JR search")
+            body = _http_error_summary(e.response) if e else str(e)
             transient = status in (429, 500, 502, 503, 504)
             if transient and attempt < max_attempts - 1:
                 wait = 0.5 * (attempt + 1)
@@ -1408,6 +1500,7 @@ def _fetch_full_page(session: requests.Session, url: str) -> Dict:
     except Exception as e:
         print(f"    [HTML ERR] {url} -> {e}")
         return {}
+    _raise_if_cloudflare_block(r, "JR review page")
 
     soup   = BeautifulSoup(r.text, "html.parser")
     result: Dict[str, Any] = {}
@@ -1658,10 +1751,13 @@ def _search_tastings_page(
                     allow_redirects=True,
                 )
                 r.raise_for_status()
+                _raise_if_cloudflare_block(r, "JR tastings search")
                 soup = BeautifulSoup(r.text, "html.parser")
                 rows = _extract_tastings_rows(soup)
                 _debug_tastings_page(r, soup, rows, label)
                 return soup, rows
+            except JRAccessBlockedError:
+                raise
             except Exception as e:
                 print(f"    [JR HTML SEARCH ERR] {type(e).__name__}: {e}")
                 return None, []
@@ -1828,8 +1924,14 @@ def search_wine(
     _jr_debug(f"search_wine normalized name={norm_name!r} vintage={norm_vintage!r} lwin={lwin!r}")
     hits = jr_msearch(session, norm_name, norm_vintage, "", search_hints=search_hints)
     if not hits:
-        print("    -> 0 usable, 0 scored")
-        return []
+        _jr_debug("ES msearch returned no hits; trying tastings HTML fallback")
+        reviews = _search_tastings_page(session, norm_name, norm_vintage, search_hints=search_hints)
+        reviews.sort(
+            key=lambda x: (str(x.get("date_tasted") or ""), float(x.get("score_20") or -9999.0)),
+            reverse=True,
+        )
+        print(f"    -> {len(reviews)} usable, {sum(1 for r in reviews if r.get('score_20') is not None)} scored")
+        return reviews
 
     match_context = _build_match_contexts(norm_name, norm_vintage, search_hints)
     _jr_debug(f"match_context primary={match_context.get('primary_name')!r} query_names={match_context.get('query_names')!r}")

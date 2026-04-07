@@ -455,6 +455,17 @@ def _is_network_error(exc: Exception) -> bool:
     return any(m in name or m in text for m in markers)
 
 
+def _is_access_blocked_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    markers = (
+        "blocked by cloudflare",
+        "cf_clearance",
+        "cloudflare challenge",
+        "access blocked",
+    )
+    return any(marker in text for marker in markers)
+
+
 def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 2.5):
     """
     Background thread: search the selected source for each wine and fill results.
@@ -599,7 +610,11 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
         except Exception as e:
             results.append({"row_idx": wine["row_idx"], "found": False})
             log(f"  x error: {type(e).__name__}: {e}")
-            if _is_network_error(e):
+            if _is_access_blocked_error(e):
+                auto_stopped = True
+                stopped = True
+                log("Auto-stop: JR access is blocked by Cloudflare. Upload fresh browser cookies including cf_clearance, then Resume.")
+            elif _is_network_error(e):
                 consecutive_net_errors += 1
                 log(f"  - network error streak: {consecutive_net_errors}")
                 if consecutive_net_errors >= 3:

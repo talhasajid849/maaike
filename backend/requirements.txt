@@ -3,6 +3,7 @@ flask-socketio==5.3.6
 gunicorn==22.0.0
 eventlet==0.36.1
 requests==2.32.3
+curl_cffi==0.15.0
 beautifulsoup4==4.12.3
 lxml==5.2.2
 python-dotenv==1.0.1

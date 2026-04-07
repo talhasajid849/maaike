@@ -215,6 +215,11 @@ function CookieStatusCard({ ck }) {
             value={ck.has_session ? '✓ Present' : '✗ Missing'}
             color={ck.has_session ? 'text-green' : 'text-red'} />
         )}
+        {ck.has_cf_clearance !== undefined && (
+          <InfoRow label="Cloudflare clearance"
+            value={ck.has_cf_clearance ? '✓ Present' : '✗ Missing'}
+            color={ck.has_cf_clearance ? 'text-green' : 'text-red'} />
+        )}
         {ck.user_id && <InfoRow label="User ID" value={ck.user_id} />}
         {ck.expires_at && <InfoRow label="Expires at (UTC)" value={ck.expires_at} />}
         <InfoRow label="Cookies loaded" value={ck.cookie_count} />

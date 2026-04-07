@@ -87,6 +87,7 @@ def _status_jr(cookies: list) -> dict:
         payload = _decode_jwt(jr["value"])
         days = _days_remaining(payload)
         has_sess = any(c.get("name", "").upper().startswith(("SESS", "SSESS")) for c in cookies)
+        has_cf_clearance = any((c.get("name") or "").lower() == "cf_clearance" for c in cookies)
         message = _expired_message(days, "JWT")
         return {
             "ok": message is None,
@@ -95,6 +96,7 @@ def _status_jr(cookies: list) -> dict:
             "is_member": payload.get("isMember", False),
             "tasting_access": payload.get("canAccessTastingNotes", False),
             "has_session": has_sess,
+            "has_cf_clearance": has_cf_clearance,
             "cookie_count": len(cookies),
         }
     except Exception as e:
