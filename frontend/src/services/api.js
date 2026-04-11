@@ -136,11 +136,12 @@ export const csvApi = {
 // ── XLSX review export ────────────────────────────────────────────────────────
 
 export const xlsxApi = {
-  upload: (file, apiKey, source = 'jancisrobinson', sleepSec = 2.5) => {
+  upload: (file, apiKey, source = 'jancisrobinson', sleepSec = 2.5, startItem = 1) => {
     const form = new FormData();
     form.append('file', file);
     form.append('source', source);
     form.append('sleep_sec', String(sleepSec));
+    form.append('start_item', String(startItem || 1));
     return fetch(`${API}/xlsx/upload`, {
       method: 'POST',
       headers: { 'X-API-Key': apiKey },

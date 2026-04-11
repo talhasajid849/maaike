@@ -26,6 +26,11 @@ except ImportError:
     _CFFI = False
 from bs4 import BeautifulSoup
 
+_REQUESTS_EXC = getattr(requests, "exceptions", requests)
+HTTPError = getattr(_REQUESTS_EXC, "HTTPError", Exception)
+TimeoutError = getattr(_REQUESTS_EXC, "Timeout", Exception)
+ConnectionError = getattr(_REQUESTS_EXC, "ConnectionError", Exception)
+
 JR_ORIGIN  = "https://www.jancisrobinson.com"
 JR_MSEARCH = "https://searchserver.jancisrobinson.com/elasticsearch_index_main_tasting_notes/_msearch"
 logger = logging.getLogger("maaike.jr")
@@ -141,6 +146,41 @@ def _raise_if_cloudflare_block(resp: Optional[requests.Response], context: str =
         raise JRAccessBlockedError(
             f"{context} blocked by Cloudflare challenge; refresh JR cookies with cf_clearance from a real browser session"
         )
+
+
+def _jr_html_headers(referer: str = "") -> Dict[str, str]:
+    return {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Referer": referer or (JR_ORIGIN + "/tastings"),
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/136.0.0.0 Safari/537.36"
+        ),
+    }
+
+
+def _prime_jr_session(session: requests.Session) -> None:
+    if getattr(session, "_maaike_jr_primed", False):
+        return
+    try:
+        r = session.get(
+            JR_ORIGIN + "/tastings",
+            timeout=15,
+            headers=_jr_html_headers(),
+            allow_redirects=True,
+        )
+        _raise_if_cloudflare_block(r, "JR warm-up")
+    except Exception as e:
+        logger.info("JR warm-up skipped: %s", e)
+    finally:
+        try:
+            setattr(session, "_maaike_jr_primed", True)
+        except Exception:
+            pass
 
 # â”€â”€â”€ JWT Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -1321,7 +1361,7 @@ def _do_msearch(session: requests.Session, payload: str) -> List[Dict]:
                     total = responses[0].get("hits", {}).get("total")
                 _jr_debug(f"msearch status={r.status_code} responses={len(responses)} total={total}")
             break
-        except requests.HTTPError as e:
+        except HTTPError as e:
             status = e.response.status_code if e.response is not None else 0
             _raise_if_cloudflare_block(e.response, "JR search")
             body = _http_error_summary(e.response) if e else str(e)
@@ -1333,7 +1373,7 @@ def _do_msearch(session: requests.Session, payload: str) -> List[Dict]:
                 continue
             print(f"    [HTTP {status}] {body}")
             return []
-        except (requests.Timeout, requests.ConnectionError) as e:
+        except (TimeoutError, ConnectionError) as e:
             if attempt < max_attempts - 1:
                 wait = 0.5 * (attempt + 1)
                 print(f"    [ES RETRY] {type(e).__name__}: {e} (retry in {wait:.1f}s)")
@@ -1494,8 +1534,14 @@ def jr_msearch(
 def _fetch_full_page(session: requests.Session, url: str) -> Dict:
     if not url:
         return {}
+    _prime_jr_session(session)
     try:
-        r = session.get(url, timeout=15)
+        r = session.get(
+            url,
+            timeout=15,
+            headers=_jr_html_headers(JR_ORIGIN + "/tastings"),
+            allow_redirects=True,
+        )
         r.raise_for_status()
     except Exception as e:
         print(f"    [HTML ERR] {url} -> {e}")
@@ -1736,18 +1782,7 @@ def _search_tastings_page(
                 r = session.get(
                     url,
                     timeout=20,
-                    headers={
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.9",
-                        "Cache-Control": "no-cache",
-                        "Pragma": "no-cache",
-                        "Referer": JR_ORIGIN + "/tastings",
-                        "User-Agent": (
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/136.0.0.0 Safari/537.36"
-                        ),
-                    },
+                    headers=_jr_html_headers(JR_ORIGIN + "/tastings"),
                     allow_redirects=True,
                 )
                 r.raise_for_status()
@@ -1919,6 +1954,7 @@ def search_wine(
     Returns list of reviews sorted by score desc.
     Each review includes: score_20, tasting_note, reviewer, drink_from/to, review_url
     """
+    _prime_jr_session(session)
     norm_vintage = _normalize_search_vintage(vintage, wine_name, lwin)
     norm_name = _normalize_search_name(wine_name, norm_vintage)
     _jr_debug(f"search_wine normalized name={norm_name!r} vintage={norm_vintage!r} lwin={lwin!r}")

@@ -27,6 +27,8 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from services.normalize_service import normalize_review, reset_note_tracking
+
 try:
     from openpyxl import load_workbook
     from openpyxl.styles import PatternFill
@@ -79,7 +81,7 @@ def parse_xlsx(file_bytes: bytes) -> List[Dict]:
     """
     Parse JR-format XLSX template and return list of wine dicts.
 
-    Each dict: { row_idx (1-based), name, vintage, lwin, lwin7, ...optional JR hints }
+    Each dict: { row_idx (1-based), name, vintage, lwin, lwin7, prefilled, ...optional source hints }
     """
     if not OPENPYXL_OK:
         raise RuntimeError("openpyxl not installed — run: pip install openpyxl")
@@ -114,6 +116,13 @@ def parse_xlsx(file_bytes: bytes) -> List[Dict]:
     dc_wine_name_col = _col_idx(raw_headers, "dc_wine_name")
     dc_search_url_col = _col_idx(raw_headers, "dc_search_url")
     dc_review_url_col = _col_idx(raw_headers, "dc_review_url")
+    critic_col = _col_idx(raw_headers, "critic")
+    score_col = _col_idx(raw_headers, "score")
+    drink_from_col = _col_idx(raw_headers, "drink_from")
+    drink_to_col = _col_idx(raw_headers, "drink_to")
+    review_date_col = _col_idx(raw_headers, "review_date")
+    review_col = _col_idx(raw_headers, "review")
+    source_url_col = _col_idx(raw_headers, "source_url")
 
     def cell(row, col):
         if col is None or col >= len(row) or row[col] is None:
@@ -179,6 +188,15 @@ def parse_xlsx(file_bytes: bytes) -> List[Dict]:
             "vintage": vintage,
             "lwin":    lwin,
             "lwin7":   lwin7,
+            "prefilled": any((
+                cell(row, critic_col),
+                cell(row, score_col),
+                cell(row, drink_from_col),
+                cell(row, drink_to_col),
+                cell(row, review_date_col),
+                cell(row, review_col),
+                cell(row, source_url_col),
+            )),
         }
         if (
             jr_search_url or jr_wine_name or jr_producer or jr_appellation
@@ -340,18 +358,25 @@ def create_job(
     wines: List[Dict],
     source_key: str = "jancisrobinson",
     sleep_sec: float = 2.5,
+    start_item: int = 1,
 ) -> str:
+    total = len(wines)
+    start_index = max(0, min(total, int(start_item or 1) - 1))
+    initial_found = sum(1 for w in wines[:start_index] if w.get("prefilled"))
     job_id = str(uuid.uuid4())
     with _lock:
         _jobs[job_id] = {
             "status":         "pending",
-            "total":          len(wines),
-            "done":           0,
-            "found":          0,
+            "total":          total,
+            "done":           start_index,
+            "found":          initial_found,
             "stop_requested": False,
             "auto_stopped":   False,
             "source":         source_key,
             "sleep_sec":      float(sleep_sec),
+            "start_item":     start_index + 1,
+            "start_index":    start_index,
+            "initial_found":  initial_found,
             "wines":          wines,
             "template_bytes": template_bytes,
             "results":        [],
@@ -372,6 +397,7 @@ def get_job(job_id: str) -> Optional[Dict]:
             "total":  j["total"],
             "done":   j["done"],
             "found":  j["found"],
+            "start_item": int(j.get("start_item") or 1),
             "stop_requested": bool(j.get("stop_requested")),
             "auto_stopped": bool(j.get("auto_stopped")),
             "pct":    round(j["done"] / j["total"] * 100, 1) if j["total"] else 0,
@@ -398,8 +424,8 @@ def request_stop(job_id: str) -> bool:
         if j["status"] == "pending":
             j["status"] = "stopped"
             j["output_bytes"] = fill_xlsx(j["template_bytes"], j["results"])
-            j["done"] = len(j["results"])
-            j["found"] = sum(1 for r in j["results"] if r.get("found"))
+            j["done"] = int(j.get("start_index") or 0) + len(j["results"])
+            j["found"] = int(j.get("initial_found") or 0) + sum(1 for r in j["results"] if r.get("found"))
         return True
 
 
@@ -466,6 +492,78 @@ def _is_access_blocked_error(exc: Exception) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _result_note_group_key(result: Dict) -> str:
+    note = str(result.get("note") or "").strip()
+    if len(note) < 40:
+        return ""
+    reviewer = str(result.get("critic_name") or "").strip().lower()
+    date_tasted = str(result.get("date_tasted") or "").strip()
+    if not reviewer and not date_tasted:
+        return ""
+    fp = note[:120].lower().replace(" ", "").replace(",", "")
+    return f"{fp}|{date_tasted}|{reviewer}"
+
+
+def _strip_duplicate_result_notes(results: List[Dict]) -> int:
+    groups: Dict[str, List[int]] = {}
+    for idx, result in enumerate(results):
+        if not result.get("found"):
+            continue
+        key = _result_note_group_key(result)
+        if not key:
+            continue
+        groups.setdefault(key, []).append(idx)
+
+    cleared = 0
+    for indexes in groups.values():
+        wine_keys = {
+            (
+                str(results[i].get("_lwin") or "").strip(),
+                str(results[i].get("_wine_name") or "").strip().lower(),
+                str(results[i].get("_vintage") or "").strip(),
+            )
+            for i in indexes
+        }
+        if len(indexes) < 2 or len(wine_keys) < 2:
+            continue
+        for i in indexes:
+            note = str(results[i].get("note") or "").strip()
+            if note:
+                results[i]["note"] = ""
+                cleared += 1
+    return cleared
+
+
+def _save_found_results_to_db(results: List[Dict], source_key: str, job_id: str) -> int:
+    from models.wine_model import upsert_review_wine
+
+    saved = 0
+    for result in results:
+        if not result.get("found"):
+            continue
+        upsert_review_wine(
+            result.get("_lwin") or "",
+            {
+                "name": result.get("_wine_name") or "",
+                "vintage": result.get("_vintage") or None,
+            },
+            {
+                "source": source_key,
+                "score_20": result.get("_score_20_db"),
+                "score_100": result.get("_score_100_db"),
+                "reviewer": result.get("critic_name") or None,
+                "note": result.get("note") or "",
+                "date_tasted": result.get("date_tasted") or None,
+                "drink_from": result.get("drink_from") or None,
+                "drink_to": result.get("drink_to") or None,
+                "review_url": result.get("source_url") or None,
+            },
+            upload_batch=f"xlsx_{job_id[:8]}",
+        )
+        saved += 1
+    return saved
+
+
 def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 2.5):
     """
     Background thread: search the selected source for each wine and fill results.
@@ -483,6 +581,8 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
         source_key = source_key or (j.get("source") or "jancisrobinson")
         sleep_sec = float(sleep_sec or j.get("sleep_sec") or 2.5)
         results: List[Dict] = list(j.get("results") or [])
+        start_index = int(j.get("start_index") or 0)
+        initial_found = int(j.get("initial_found") or 0)
         j["status"] = "running"
         j["source"] = source_key
         j["sleep_sec"] = float(sleep_sec)
@@ -490,8 +590,8 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
         j["stop_requested"] = False
         j["auto_stopped"] = False
         j["output_bytes"] = None
-        j["done"] = len(results)
-        j["found"] = sum(1 for r in results if r.get("found"))
+        j["done"] = start_index + len(results)
+        j["found"] = initial_found + sum(1 for r in results if r.get("found"))
 
     source_label = source_key
     try:
@@ -512,11 +612,12 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
             _jobs[job_id]["error"] = f"No session for '{source_key}' - upload cookies in Settings first"
         return
 
-    processed = len(results)
+    processed = start_index + len(results)
     saved = 0
     stopped = False
     auto_stopped = False
     consecutive_net_errors = 0
+    reset_note_tracking()
 
     if processed > 0:
         log(f"Resuming from row {processed + 1}/{len(wines)}...")
@@ -548,12 +649,21 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
 
             if reviews:
                 consecutive_net_errors = 0
-                reviews_dated = [(r, _parse_date(r.get("date_tasted") or "")) for r in reviews]
+                normalized_reviews = [
+                    normalize_review(
+                        source_key,
+                        review,
+                        wine_name=name,
+                        flag_duplicate_notes=False,
+                    )
+                    for review in reviews
+                ]
+                reviews_dated = [(r, _parse_date(r.get("date_tasted") or "")) for r in normalized_reviews]
                 reviews_dated.sort(key=lambda x: x[1] or datetime.min, reverse=True)
                 rev = reviews_dated[0][0]
 
                 reviewer = rev.get("reviewer") or rev.get("critic_name") or ""
-                note = rev.get("tasting_note") or rev.get("note") or ""
+                note = rev.get("note") or rev.get("tasting_note") or ""
                 date_tasted = rev.get("date_tasted") or rev.get("review_date") or ""
 
                 score_20 = rev.get("score_20")
@@ -563,30 +673,6 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
                 if score_100 is None:
                     score_100 = rev.get("score")
                 out_score = score_20 if score_20 is not None else score_100
-
-                try:
-                    from models.wine_model import upsert_review_wine
-                    upsert_review_wine(
-                        lwin or "",
-                        {
-                            "name": name,
-                            "vintage": vintage or None,
-                        },
-                        {
-                            "source": source_key,
-                            "score_20": score_20,
-                            "score_100": score_100,
-                            "reviewer": reviewer,
-                            "note": note,
-                            "date_tasted": date_tasted,
-                            "drink_from": rev.get("drink_from") or None,
-                            "drink_to": rev.get("drink_to") or None,
-                        },
-                        upload_batch=f"xlsx_{job_id[:8]}",
-                    )
-                    saved += 1
-                except Exception as db_err:
-                    log(f"  - DB save error: {type(db_err).__name__}: {db_err}")
 
                 results.append({
                     "row_idx": wine["row_idx"],
@@ -598,6 +684,11 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
                     "date_tasted": date_tasted,
                     "note": note,
                     "source_url": rev.get("review_url") or rev.get("source_url") or "",
+                    "_wine_name": name,
+                    "_vintage": vintage,
+                    "_lwin": lwin,
+                    "_score_20_db": score_20,
+                    "_score_100_db": score_100,
                 })
                 scale = "/20" if score_20 is not None else "/100"
                 score_log = out_score if out_score is not None else "?"
@@ -626,8 +717,8 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
 
         with _lock:
             if job_id in _jobs:
-                _jobs[job_id]["done"] = len(results)
-                _jobs[job_id]["found"] = sum(1 for r in results if r.get("found"))
+                _jobs[job_id]["done"] = start_index + len(results)
+                _jobs[job_id]["found"] = initial_found + sum(1 for r in results if r.get("found"))
                 _jobs[job_id]["results"] = list(results)
                 if _jobs[job_id].get("stop_requested"):
                     stopped = True
@@ -640,6 +731,15 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
 
         time.sleep(sleep_sec)
 
+    duplicate_notes_cleared = _strip_duplicate_result_notes(results)
+    if duplicate_notes_cleared:
+        log(f"Cleared {duplicate_notes_cleared} duplicate session note(s) from XLSX results.")
+
+    try:
+        saved = _save_found_results_to_db(results, source_key, job_id)
+    except Exception as db_err:
+        log(f"  - DB save error: {type(db_err).__name__}: {db_err}")
+
     log("Generating filled XLSX...")
     try:
         output_bytes = fill_xlsx(template_bytes, results)
@@ -650,21 +750,21 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
         return
 
     total = len(wines)
-    found = sum(1 for r in results if r.get("found"))
+    found = initial_found + sum(1 for r in results if r.get("found"))
     pct = round(found / total * 100, 1) if total else 0
     log(f"Saved to DB: {saved}/{found} found review(s)")
     if stopped:
         if auto_stopped:
-            log(f"Auto-stopped - processed {len(results)}/{total}, found {found}. Click Download or Resume.")
+            log(f"Auto-stopped - processed {start_index + len(results)}/{total}, found {found}. Click Download or Resume.")
         else:
-            log(f"Stopped - processed {len(results)}/{total}, found {found}. Click Download.")
+            log(f"Stopped - processed {start_index + len(results)}/{total}, found {found}. Click Download.")
     else:
         log(f"Done - {found}/{total} found ({pct}%). Click Download.")
 
     with _lock:
         _jobs[job_id]["status"] = "stopped" if stopped else "done"
         _jobs[job_id]["output_bytes"] = output_bytes
-        _jobs[job_id]["done"] = len(results)
+        _jobs[job_id]["done"] = start_index + len(results)
         _jobs[job_id]["found"] = found
         _jobs[job_id]["results"] = list(results)
         _jobs[job_id]["auto_stopped"] = auto_stopped

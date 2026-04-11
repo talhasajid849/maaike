@@ -40,11 +40,18 @@ def upload():
         return jsonify({"ok": False, "error": f"Unsupported source: {source}"}), 400
 
     sleep_sec = float(request.form.get("sleep_sec", "2.5"))
+    start_item_raw = (request.form.get("start_item") or "1").strip()
+    try:
+        start_item = int(start_item_raw or "1")
+    except ValueError:
+        return jsonify({"ok": False, "error": "Start item must be a whole number"}), 400
+    if start_item < 1:
+        return jsonify({"ok": False, "error": "Start item must be 1 or greater"}), 400
 
-    job_id = create_job(template_bytes, wines, source, sleep_sec)
+    job_id = create_job(template_bytes, wines, source, sleep_sec, start_item=start_item)
     threading.Thread(target=run_job, args=(job_id, source, sleep_sec), daemon=True).start()
 
-    return jsonify({"ok": True, "job_id": job_id, "total": len(wines), "source": source})
+    return jsonify({"ok": True, "job_id": job_id, "total": len(wines), "source": source, "start_item": start_item})
 
 
 def status(job_id: str):

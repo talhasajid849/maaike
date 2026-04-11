@@ -672,11 +672,15 @@ finally:
 print("\n══ 2k. XLSX runner passes JR search hints ═════════════════")
 _orig_get_session = None
 _orig_jr_search = None
+_orig_upsert_review_wine = None
 try:
     import services.session_service as session_service
+    import models.wine_model as wine_model
     _orig_get_session = session_service.get_session
     _orig_jr_search = jr_mod.search_wine
+    _orig_upsert_review_wine = wine_model.upsert_review_wine
     captured = {}
+    saved_reviews = []
 
     def fake_get_session(_source_key):
         return object()
@@ -685,8 +689,18 @@ try:
         captured["search_hints"] = dict(search_hints or {})
         return [{"score_20": 16.0, "date_tasted": "08 Jun 2023", "review_url": "https://example.test/review"}]
 
+    def fake_upsert_review_wine(lwin_full, wine_data, review_data, upload_batch=""):
+        saved_reviews.append({
+            "lwin": lwin_full,
+            "wine_data": dict(wine_data or {}),
+            "review_data": dict(review_data or {}),
+            "upload_batch": upload_batch,
+        })
+        return {"action": "updated", "wine_id": 1}
+
     session_service.get_session = fake_get_session
     jr_mod.search_wine = fake_search
+    wine_model.upsert_review_wine = fake_upsert_review_wine
 
     job_id = xlsx_mod.create_job(
         buf.getvalue(),
@@ -707,11 +721,102 @@ try:
     check("xlsx runner forwards JR producer hint", captured.get("search_hints", {}).get("jr_producer") == "Ch La Fleur de Bo\u00fcard", True)
     check("xlsx runner forwards JR URL hint", "search-full" in (captured.get("search_hints", {}).get("jr_search_url") or ""), True)
     check("xlsx runner forwards RP URL hint", captured.get("search_hints", {}).get("rp_search_url") == "https://www.robertparker.com/wines/123456/test-slug", True)
+    check("xlsx runner saves review URL into DB payload", saved_reviews[0]["review_data"].get("review_url") == "https://example.test/review", True)
 finally:
     if _orig_get_session is not None:
         session_service.get_session = _orig_get_session
     if _orig_jr_search is not None:
         jr_mod.search_wine = _orig_jr_search
+    if _orig_upsert_review_wine is not None:
+        wine_model.upsert_review_wine = _orig_upsert_review_wine
+
+print("\n== 2k2. XLSX runner strips paywalls, stubs, and duplicate session notes ==")
+_orig_get_session = None
+_orig_jr_search = None
+_orig_upsert_review_wine = None
+try:
+    import services.session_service as session_service
+    import models.wine_model as wine_model
+    _orig_get_session = session_service.get_session
+    _orig_jr_search = jr_mod.search_wine
+    _orig_upsert_review_wine = wine_model.upsert_review_wine
+    saved_reviews = []
+
+    def fake_get_session(_source_key):
+        return object()
+
+    duplicate_note = (
+        "60% Sauvignon Blanc, 40% Semillon. Lovely aroma of zesty lemon cream, "
+        "with grapefruit, cedar and vanilla. Fresh and long on the finish."
+    )
+
+    def fake_search(session, name, vintage, lwin="", search_hints=None):
+        if "Wine A" in name:
+            return [{
+                "score_20": 16.5,
+                "date_tasted": "22 Apr 2015",
+                "reviewer": "Julia Harding MW",
+                "tasting_note": duplicate_note,
+                "review_url": "https://example.test/a",
+            }]
+        if "Wine B" in name:
+            return [{
+                "score_20": 16.5,
+                "date_tasted": "22 Apr 2015",
+                "reviewer": "Julia Harding MW",
+                "tasting_note": duplicate_note,
+                "review_url": "https://example.test/b",
+            }]
+        if "Wine C" in name:
+            return [{
+                "score_20": 17.0,
+                "date_tasted": "05 Jan 2026",
+                "reviewer": "Jancis Robinson",
+                "tasting_note": "Become a member to read more",
+                "review_url": "https://example.test/paywall",
+            }]
+        return [{
+            "score_20": 17.0,
+            "date_tasted": "10 Dec 2007",
+            "reviewer": "Jancis Robinson",
+            "tasting_note": "Magnum",
+            "review_url": "https://example.test/stub",
+        }]
+
+    def fake_upsert_review_wine(lwin_full, wine_data, review_data, upload_batch=""):
+        saved_reviews.append(dict(review_data or {}))
+        return {"action": "updated", "wine_id": 1}
+
+    session_service.get_session = fake_get_session
+    jr_mod.search_wine = fake_search
+    wine_model.upsert_review_wine = fake_upsert_review_wine
+
+    workbook = Workbook()
+    ws2 = workbook.active
+    ws2.append(["Publisher", "LWIN11", "Product_Name", "Vintage", "Critic_Name", "Score", "Review_Date", "Review", "Source_URL"])
+    ws2.append(["Jancis Robinson", "Optional if Name set", "Optional if LWIN set", "YYYY or NV", "", "", "", "", ""])
+    ws2.append(["Jancis Robinson", "11111112020", "Wine A 2020", "2020", "", "", "", "", ""])
+    ws2.append(["Jancis Robinson", "22222222021", "Wine B 2021", "2021", "", "", "", "", ""])
+    ws2.append(["Jancis Robinson", "33333332022", "Wine C 2022", "2022", "", "", "", "", ""])
+    ws2.append(["Jancis Robinson", "44444441996", "Wine D 1996", "1996", "", "", "", "", ""])
+    buf2 = io.BytesIO()
+    workbook.save(buf2)
+    wines2 = xlsx_mod.parse_xlsx(buf2.getvalue())
+    job_id = xlsx_mod.create_job(buf2.getvalue(), wines2)
+    xlsx_mod.run_job(job_id, source_key="jancisrobinson", sleep_sec=0)
+    internal_results = xlsx_mod._jobs[job_id]["results"]
+
+    check("xlsx runner blanks both duplicate session notes", all(not internal_results[i].get("note") for i in (0, 1)), True)
+    check("xlsx runner blanks paywall placeholder note", internal_results[2].get("note") == "", True)
+    check("xlsx runner blanks short stub note", internal_results[3].get("note") == "", True)
+    check("xlsx runner still preserves review URL after note cleanup", saved_reviews[2].get("review_url") == "https://example.test/paywall", True)
+finally:
+    if _orig_get_session is not None:
+        session_service.get_session = _orig_get_session
+    if _orig_jr_search is not None:
+        jr_mod.search_wine = _orig_jr_search
+    if _orig_upsert_review_wine is not None:
+        wine_model.upsert_review_wine = _orig_upsert_review_wine
 
 # ─── 3. RP query builder ──────────────────────────────────────────────────────
 print("\n══ 3. RP query builder (_build_rp_queries) ══════════════════════════")

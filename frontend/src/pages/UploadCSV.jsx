@@ -42,6 +42,7 @@ export default function UploadCSV() {
   const [xlsxSources, setXlsxSources] = useState(DEFAULT_XLSX_SOURCES);
   const [xlsxSource, setXlsxSource] = useState('robertparker');
   const [xlsxJobs, setXlsxJobs] = useState([]);
+  const [xlsxStartItem, setXlsxStartItem] = useState('1');
 
   const inputRef = useRef(null);
   const sourceInputRefs = useRef({});
@@ -210,8 +211,14 @@ export default function UploadCSV() {
     };
   }, [addToast]);
 
+  function normalizedStartItem() {
+    const n = Number.parseInt(String(xlsxStartItem || '1').trim(), 10);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  }
+
   async function startXlsxJob(file, sourceKey = xlsxSource) {
-    const d = await xlsxApi.upload(file, apiKey, sourceKey);
+    const startItem = normalizedStartItem();
+    const d = await xlsxApi.upload(file, apiKey, sourceKey, 2.5, startItem);
     if (!d?.ok) {
       addToast(d?.error || `Upload failed for ${file.name} (${getSourceLabel(sourceKey)})`, 'error');
       return;
@@ -223,9 +230,10 @@ export default function UploadCSV() {
       source: sourceKey,
       status: 'pending',
       total: d.total || 0,
-      done: 0,
+      done: Math.max(0, (d.start_item || startItem) - 1),
       found: 0,
-      pct: 0,
+      pct: (d.total || 0) > 0 ? Math.round((Math.max(0, (d.start_item || startItem) - 1) / (d.total || 1)) * 1000) / 10 : 0,
+      start_item: d.start_item || startItem,
       ready: false,
       error: null,
       log: [],
@@ -425,6 +433,22 @@ export default function UploadCSV() {
                   ))}
                 </select>
               </div>
+              <div className="mb-3">
+                <label className="block text-[11px] text-[#666] mb-1.5 uppercase tracking-wider">Start from item #</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={xlsxStartItem}
+                  onChange={(e) => setXlsxStartItem(e.target.value)}
+                  className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded px-2.5 py-2 text-xs text-[#ddd]"
+                  placeholder="1"
+                />
+                <div className="mt-1 text-[11px] text-[#555]">
+                  Leave as <code className="text-teal-500">1</code> to start from the first wine.
+                  If a job stopped at <code className="text-teal-500">3598/5301</code>, enter <code className="text-teal-500">3599</code>.
+                </div>
+              </div>
               {xlsxSources.length > 1 && (
                 <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {xlsxSources.map((s) => (
@@ -566,6 +590,9 @@ export default function UploadCSV() {
                             ? (job.auto_stopped ? 'Auto-stopped (network)' : 'Stopped')
                             : 'Error'}
                       {job.fileName && <span className="text-[#555] ml-2">{job.fileName}</span>}
+                      {(job.start_item || 1) > 1 && (
+                        <span className="text-[#555] ml-2">start #{job.start_item}</span>
+                      )}
                     </span>
                     <span className="text-[#aaa] tabular-nums">
                       {job.done || 0}/{job.total || 0}

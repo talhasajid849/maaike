@@ -1,7 +1,7 @@
 [
   {
     "name": "mcforms-20191804-sessionId",
-    "value": "\"84f45abc-1df1-4cc8-9cfd-6484877c7b4c\"",
+    "value": "\"7eac4393-04a5-432a-8c90-59aa5f7c0172\"",
     "domain": "www.jancisrobinson.com",
     "path": "/",
     "expires": -1,
@@ -28,7 +28,7 @@
   },
   {
     "name": "jr_session_id",
-    "value": "589289465.1775306565_1775306564",
+    "value": "589289465.1775306565_1775681506",
     "domain": ".jancisrobinson.com",
     "path": "/",
     "expires": -1,
@@ -61,17 +61,27 @@
     "value": "274264d8-e00b-493d-a93f-bd86261da87b39e5ae",
     "domain": ".www.jancisrobinson.com",
     "path": "/",
-    "expires": 1806842567,
+    "expires": 1807217516,
+    "httpOnly": false,
+    "secure": true,
+    "sameSite": "Strict"
+  },
+  {
+    "name": "__stripe_sid",
+    "value": "c520f3ff-3eb8-46ea-bd4a-7e22c97ccd237c87e8",
+    "domain": ".www.jancisrobinson.com",
+    "path": "/",
+    "expires": 1775683316,
     "httpOnly": false,
     "secure": true,
     "sameSite": "Strict"
   },
   {
     "name": "SSESSe9e03b6489331a1d7bedcf638eca2d24",
-    "value": "NjzhWHwzAT5qgnW%2CYvb8C4LN8gtFfLCS6hEfJaZ1GL064Gu9",
+    "value": "JAhqQuCPMSFQOL05-QYk7mKPBU82RyR7U-9YVxaOuAQ",
     "domain": ".www.jancisrobinson.com",
     "path": "/",
-    "expires": 1777898575.361912,
+    "expires": 1778273517.044263,
     "httpOnly": true,
     "secure": true
   },
@@ -80,34 +90,43 @@
     "value": "1",
     "domain": "www.jancisrobinson.com",
     "path": "/",
-    "expires": 1806844403.261808,
+    "expires": 1807217517.981151,
     "httpOnly": false,
     "secure": true
   },
   {
     "name": "jrAccessRole",
-    "value": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJvZmZpY2VAcnVlcGluYXJkLmNvbSIsInN1YiI6Im9mZmljZUBydWVwaW5hcmQuY29tIiwiYXVkIjoiaHR0cHM6Ly9pZGVudGl0eXRvb2xraXQuZ29vZ2xlYXBpcy5jb20vZ29vZ2xlLmlkZW50aXR5LmlkZW50aXR5dG9vbGtpdC52MS5JZGVudGl0eVRvb2xraXQiLCJpYXQiOjE3NzUzMDgzMTgsImV4cCI6MTc3NzkwMDMxOCwidmFsaWQiOnRydWUsImlzTWVtYmVyIjp0cnVlLCJjYW5BY2Nlc3NUYXN0aW5nTm90ZXMiOnRydWUsImRydXBhbCI6eyJ1aWQiOiIxMDE0MjkiLCJyb2xlcyI6WyJ0aWVyX21lbWJlciJdfX0.rad-GFxKI85d-KGc7xvKY6SXNtY30RuFSDv8kiSJpp8",
+    "value": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJvZmZpY2VAcnVlcGluYXJkLmNvbSIsInN1YiI6Im9mZmljZUBydWVwaW5hcmQuY29tIiwiYXVkIjoiaHR0cHM6Ly9pZGVudGl0eXRvb2xraXQuZ29vZ2xlYXBpcy5jb20vZ29vZ2xlLmlkZW50aXR5LmlkZW50aXR5dG9vbGtpdC52MS5JZGVudGl0eVRvb2xraXQiLCJpYXQiOjE3NzU2ODIyMjUsImV4cCI6MTc3ODI3NDIyNSwidmFsaWQiOnRydWUsImlzTWVtYmVyIjp0cnVlLCJjYW5BY2Nlc3NUYXN0aW5nTm90ZXMiOnRydWUsImRydXBhbCI6eyJ1aWQiOiIxMDE0MjkiLCJyb2xlcyI6WyJ0aWVyX21lbWJlciJdfX0.x9ilLdDmIjm25FZyqGPfM7l9PH3eEQRiKeDqA1zKELI",
     "domain": "www.jancisrobinson.com",
     "path": "/",
-    "expires": 1777900319.869776,
+    "expires": 1778274225.771,
     "httpOnly": false,
     "secure": false
   },
   {
-    "name": "_ga_H7X3XC11JN",
-    "value": "GS2.1.s1775306564$o1$g1$t1775308396$j60$l0$h0",
+    "name": "cf_clearance",
+    "value": "5ItvtJHZGq3fwwlb64U5ouiaJ9PsAKjfSlKz8Z41N7M-1775682247-1.2.1.1-ct2_P3JfarxeFvZvB5biHRJNKqq5oVuzkJrhhS3ekT9g6WGMoPSCreRA_FDRjNSl6wNk3dCRn5LYbUC7utgOFGyylB0_lVmQ2J543hvFIs1phrI_iGhmCn8PtmPSJt1XXNtE3NnF5lDQheUridvOb8N_m5.E_xJ_M0ROWxpvbWt8wxrGAazRbJepgrlzQpQe0qpEV_bwCh75MM1YlBQAeoRhMFA3G4Ebg7.27cFB9VO8mc0gmIipnCIbhGcwHdQzHmYyOmOqTv18DIE2zohYwxYpZM.99rn0AE5DxEpwPFyM7w9MIPrIpgZ.ePSXEtn4ndMFylwZdxY_P5yfpBjUtA",
     "domain": ".jancisrobinson.com",
     "path": "/",
-    "expires": 1809868396.568664,
+    "expires": 1807218247.481,
+    "httpOnly": true,
+    "secure": true
+  },
+  {
+    "name": "_ga_H7X3XC11JN",
+    "value": "GS2.1.s1775681506$o12$g1$t1775682247$j38$l0$h0",
+    "domain": ".jancisrobinson.com",
+    "path": "/",
+    "expires": 1810241518.249179,
     "httpOnly": false,
     "secure": false
   },
   {
     "name": "OptanonConsent",
-    "value": "isGpcEnabled=0&datestamp=Sat+Apr+04+2026+06%3A13%3A16+GMT-0700+(Pacific+Daylight+Time)&version=202601.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&landingPath=NotLandingPage&groups=C0002%3A1%2CC0001%3A1%2CC0003%3A1%2CC0004%3A1&AwaitingReconsent=false",
+    "value": "isGpcEnabled=0&datestamp=Wed+Apr+08+2026+14%3A04%3A07+GMT-0700+(Pacific+Daylight+Time)&version=202601.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&landingPath=NotLandingPage&groups=C0002%3A1%2CC0001%3A1%2CC0003%3A1%2CC0004%3A1&AwaitingReconsent=false",
     "domain": ".jancisrobinson.com",
     "path": "/",
-    "expires": 1806844396,
+    "expires": 1807218247,
     "httpOnly": false,
     "secure": false,
     "sameSite": "Lax"

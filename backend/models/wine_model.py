@@ -910,8 +910,8 @@ def upsert_review_wine(lwin_full: str, wine_data: dict, review_data: dict, uploa
         conn.execute("""
             INSERT INTO reviews
                 (wine_id, source, score_20, score_100, reviewer,
-                 note, note_length, drink_from, drink_to, date_tasted, jr_lwin)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                 note, note_length, drink_from, drink_to, date_tasted, review_url, jr_lwin)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             wine_id, source,
             score_20,
@@ -922,6 +922,7 @@ def upsert_review_wine(lwin_full: str, wine_data: dict, review_data: dict, uploa
             review_data.get("drink_from") or None,
             review_data.get("drink_to") or None,
             review_data.get("date_tasted") or None,
+            review_data.get("review_url") or None,
             lwin_full,
         ))
 
