@@ -11,7 +11,13 @@ from flask import jsonify, request, send_file
 def upload():
     """POST /api/xlsx/upload - parse XLSX, start background enrichment job."""
     from config.sources import SOURCES
-    from services.xlsx_service import parse_xlsx, detect_source_from_template, create_job, run_job
+    from services.xlsx_service import (
+        apply_lwin_filter,
+        create_file_upload,
+        create_job,
+        detect_source_from_template,
+        run_job,
+    )
 
     f = request.files.get("file")
     if not f:
@@ -22,16 +28,6 @@ def upload():
         return jsonify({"ok": False, "error": "File must be .xlsx or .xlsm"}), 400
 
     template_bytes = f.read()
-
-    try:
-        wines = parse_xlsx(template_bytes)
-    except RuntimeError as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"Failed to parse XLSX: {e}"}), 400
-
-    if not wines:
-        return jsonify({"ok": False, "error": "No wine rows found. Check the file format."}), 400
 
     source = (request.form.get("source") or "").strip().lower()
     if not source:
@@ -48,10 +44,37 @@ def upload():
     if start_item < 1:
         return jsonify({"ok": False, "error": "Start item must be 1 or greater"}), 400
 
-    job_id = create_job(template_bytes, wines, source, sleep_sec, start_item=start_item)
+    try:
+        upload = create_file_upload(filename, template_bytes, source)
+        wines, lwin_filter = apply_lwin_filter(upload["wines"], request.form.get("lwin_filter"))
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to parse XLSX: {e}"}), 400
+
+    job_id = create_job(
+        upload["template_bytes"],
+        wines,
+        source,
+        sleep_sec,
+        start_item=start_item,
+        file_id=upload["file_id"],
+        lwin_filter=lwin_filter,
+    )
     threading.Thread(target=run_job, args=(job_id, source, sleep_sec), daemon=True).start()
 
-    return jsonify({"ok": True, "job_id": job_id, "total": len(wines), "source": source, "start_item": start_item})
+    return jsonify({
+        "ok": True,
+        "job_id": job_id,
+        "file_id": upload["file_id"],
+        "total": len(wines),
+        "file_total": len(upload["wines"]),
+        "source": source,
+        "start_item": start_item,
+        "lwin_filter": lwin_filter,
+    })
 
 
 def status(job_id: str):
@@ -111,4 +134,94 @@ def download(job_id: str):
         as_attachment=True,
         download_name="maaike_reviews.xlsx",
     )
+
+
+def list_files():
+    from services.xlsx_service import list_file_records
+
+    return jsonify({"ok": True, "files": list_file_records()})
+
+
+def file_detail(file_id: str):
+    from services.xlsx_service import get_file_detail
+
+    detail = get_file_detail(file_id)
+    if not detail:
+        return jsonify({"ok": False, "error": "File not found"}), 404
+    return jsonify({"ok": True, **detail})
+
+
+def file_download(file_id: str):
+    from services.xlsx_service import get_file_download
+
+    kind = (request.args.get("kind") or "original").strip().lower()
+    if kind not in ("original", "output"):
+        return jsonify({"ok": False, "error": "Invalid download kind"}), 400
+
+    payload = get_file_download(file_id, kind=kind)
+    if not payload:
+        return jsonify({"ok": False, "error": "File not ready"}), 404
+
+    return send_file(
+        payload["path"],
+        as_attachment=True,
+        download_name=payload["download_name"],
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+def restart(file_id: str):
+    from config.sources import SOURCES
+    from services.xlsx_service import restart_file_job, run_job
+
+    data = request.get_json(silent=True) or {}
+    source = (data.get("source") or "").strip().lower()
+    if not source:
+        source = "jancisrobinson"
+    if source not in SOURCES:
+        return jsonify({"ok": False, "error": f"Unsupported source: {source}"}), 400
+
+    try:
+        start_item = int(data.get("start_item") or 1)
+    except ValueError:
+        return jsonify({"ok": False, "error": "Start item must be a whole number"}), 400
+    if start_item < 1:
+        return jsonify({"ok": False, "error": "Start item must be 1 or greater"}), 400
+
+    sleep_sec = float(data.get("sleep_sec") or 2.5)
+    try:
+        payload, reason = restart_file_job(
+            file_id,
+            source,
+            sleep_sec=sleep_sec,
+            start_item=start_item,
+            lwin_filter_raw=data.get("lwin_filter"),
+        )
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    if not payload:
+        code = 404 if reason == "not_found" else 409 if reason == "already_running" else 400
+        msg = {
+            "not_found": "File not found",
+            "already_running": "This file already has a running job",
+        }.get(reason, "File cannot be restarted")
+        return jsonify({"ok": False, "error": msg}), code
+
+    threading.Thread(target=run_job, args=(payload["job_id"], source, sleep_sec), daemon=True).start()
+    return jsonify({"ok": True, **payload})
+
+
+def delete(file_id: str):
+    from services.xlsx_service import delete_file
+
+    ok, reason = delete_file(file_id)
+    if not ok:
+        code = 404 if reason == "not_found" else 409 if reason == "job_running" else 400
+        msg = {
+            "not_found": "File not found",
+            "job_running": "Stop the running job before deleting this file",
+        }.get(reason, "File cannot be deleted")
+        return jsonify({"ok": False, "error": msg}), code
+
+    return jsonify({"ok": True, "file_id": file_id})
 

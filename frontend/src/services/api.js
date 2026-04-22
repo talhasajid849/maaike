@@ -136,12 +136,15 @@ export const csvApi = {
 // ── XLSX review export ────────────────────────────────────────────────────────
 
 export const xlsxApi = {
-  upload: (file, apiKey, source = 'jancisrobinson', sleepSec = 2.5, startItem = 1) => {
+  upload: (file, apiKey, source = 'jancisrobinson', sleepSec = 2.5, startItem = 1, lwinFilter = '') => {
     const form = new FormData();
     form.append('file', file);
     form.append('source', source);
     form.append('sleep_sec', String(sleepSec));
     form.append('start_item', String(startItem || 1));
+    if (String(lwinFilter || '').trim()) {
+      form.append('lwin_filter', String(lwinFilter || '').trim());
+    }
     return fetch(`${API}/xlsx/upload`, {
       method: 'POST',
       headers: { 'X-API-Key': apiKey },
@@ -152,8 +155,17 @@ export const xlsxApi = {
   status: (jobId, apiKey) => ap(`/xlsx/status/${jobId}`, {}, apiKey),
   stop:   (jobId, apiKey) => ap(`/xlsx/stop/${jobId}`, { method: 'POST' }, apiKey),
   resume: (jobId, apiKey) => ap(`/xlsx/resume/${jobId}`, { method: 'POST' }, apiKey),
+  files:  (apiKey) => ap('/xlsx/files', {}, apiKey),
+  file:   (fileId, apiKey) => ap(`/xlsx/files/${fileId}`, {}, apiKey),
+  restartFile: (fileId, data, apiKey) => ap(`/xlsx/files/${fileId}/restart`, {
+    method: 'POST',
+    body: JSON.stringify(data || {}),
+  }, apiKey),
+  deleteFile: (fileId, apiKey) => ap(`/xlsx/files/${fileId}`, { method: 'DELETE' }, apiKey),
 
   downloadUrl: (jobId, apiKey) => `${API}/xlsx/download/${jobId}?api_key=${apiKey}`,
+  fileDownloadUrl: (fileId, apiKey, kind = 'original') =>
+    `${API}/xlsx/files/${fileId}/download?api_key=${apiKey}&kind=${encodeURIComponent(kind)}`,
 };
 
 // ── Admin ─────────────────────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ import os
 import logging
 from pathlib import Path
 
-from flask import Flask, redirect, send_from_directory
+from flask import Flask, send_from_directory
 from flask_socketio import SocketIO
 
 from config import API_KEY, SECRET_KEY
@@ -30,8 +30,20 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s — %(message)s",
 )
 
-BASE_DIR   = Path(__file__).parent
-STATIC_DIR = BASE_DIR.parent / "frontend"
+BASE_DIR = Path(__file__).parent
+FRONTEND_DIR = BASE_DIR.parent / "frontend"
+STATIC_DIR = FRONTEND_DIR / "dist" if (FRONTEND_DIR / "dist").exists() else FRONTEND_DIR
+SPA_SLUGS = {
+    "",
+    "signin",
+    "dashboard",
+    "wines",
+    "add-wine",
+    "upload",
+    "xlsx-files",
+    "sources",
+    "settings",
+}
 
 # ─── App factory ─────────────────────────────────────────────────────────────
 
@@ -75,17 +87,42 @@ def auth():
 
 # ─── Frontend static files ────────────────────────────────────────────────────
 
+def _serve_spa():
+    return send_from_directory(str(STATIC_DIR), "index.html")
+
+
 @app.get("/")
-def root():        return redirect("/dashboard")
+def root():
+    return _serve_spa()
+
 
 @app.get("/signin")
-def signin():      return send_from_directory(str(STATIC_DIR), "signin.html")
-
 @app.get("/dashboard")
-def dashboard():   return send_from_directory(str(STATIC_DIR), "dashboard.html")
+@app.get("/wines")
+@app.get("/add-wine")
+@app.get("/upload")
+@app.get("/upload/<path:subpath>")
+@app.get("/xlsx-files")
+@app.get("/sources")
+@app.get("/settings")
+def spa_pages(subpath: str = ""):
+    return _serve_spa()
+
 
 @app.get("/<path:filename>")
-def static_files(filename): return send_from_directory(str(STATIC_DIR), filename)
+def static_files(filename):
+    full_path = STATIC_DIR / filename
+    if full_path.is_file():
+        return send_from_directory(str(STATIC_DIR), filename)
+
+    first = filename.split("/", 1)[0].strip().lower()
+    if first in SPA_SLUGS and "." not in Path(first).name:
+        return _serve_spa()
+
+    if "." not in Path(filename).name:
+        return _serve_spa()
+
+    return ("Not found", 404)
 
 # ─── Health ───────────────────────────────────────────────────────────────────
 

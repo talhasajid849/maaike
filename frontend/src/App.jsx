@@ -9,6 +9,7 @@ import Dashboard   from './pages/Dashboard.jsx';
 import WineList    from './pages/WineList.jsx';
 import AddWine     from './pages/AddWine.jsx';
 import UploadCSV   from './pages/UploadCSV.jsx';
+import XlsxFiles   from './pages/XlsxFiles.jsx';
 import Sources     from './pages/Sources.jsx';
 import Settings    from './pages/Settings.jsx';
 
@@ -21,6 +22,7 @@ const PAGES = {
   wines:     WineList,
   addwine:   AddWine,
   upload:    UploadCSV,
+  xlsxfiles: XlsxFiles,
   sources:   Sources,
   settings:  Settings,
 };

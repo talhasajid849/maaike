@@ -49,6 +49,9 @@ SEARCH_MAX_QUERY_VARIANTS = int(os.environ.get("SEARCH_MAX_QUERY_VARIANTS", "8")
 SEARCH_MAX_QUERY_VARIANTS_WITH_HINTS = int(os.environ.get("SEARCH_MAX_QUERY_VARIANTS_WITH_HINTS", "6"))
 JR_HTML_MAX_TERMS_WITH_HINTS = int(os.environ.get("JR_HTML_MAX_TERMS_WITH_HINTS", "4"))
 JR_DEBUG_SEARCH = os.environ.get("JR_DEBUG_SEARCH", "0").strip().lower() in ("1", "true", "yes", "on")
+JR_NOTE_RETRY_ATTEMPTS = int(os.environ.get("JR_NOTE_RETRY_ATTEMPTS", "5"))
+JR_NOTE_RETRY_SLEEP_SEC = float(os.environ.get("JR_NOTE_RETRY_SLEEP_SEC", "2"))
+JR_DETAIL_FETCH_CANDIDATES = max(1, int(os.environ.get("JR_DETAIL_FETCH_CANDIDATES", "4")))
 MATCH_REQUIRE_EXACT_VINTAGE = os.environ.get("MATCH_REQUIRE_EXACT_VINTAGE", "1").strip().lower() in ("1", "true", "yes", "on")
 MATCH_WINE_COVERAGE = float(os.environ.get("MATCH_WINE_COVERAGE", "0.60"))
 MATCH_REMAINING_APPELLATION_COVERAGE = float(os.environ.get("MATCH_REMAINING_APPELLATION_COVERAGE", "0.60"))
@@ -308,9 +311,13 @@ _REGION_TERMS = {
     # French sub-appellations / AOC
     "haut-medoc", "medoc", "saint-julien", "pauillac", "margaux",
     "saint-estephe", "saint-emilion", "saint-emilion grand cru",
+    "saint-georges-saint-emilion", "saint georges saint emilion",
+    "puisseguin-saint-emilion", "puisseguin saint emilion",
     "pomerol", "lalande-de-pomerol", "lalande de pomerol",
     "pessac-leognan", "graves", "sauternes", "barsac",
     "fronsac", "canon-fronsac", "blaye", "bourg", "castillon",
+    "moulis-en-medoc", "moulis en medoc",
+    "bordeaux superieur", "bordeaux supérieur",
     # RhÃ´ne / Southern France
     "cote-rotie", "cote rotie", "condrieu", "cornas", "hermitage",
     "crozes-hermitage", "gigondas", "vacqueyras", "chateauneuf-du-pape",
@@ -333,13 +340,71 @@ _REGION_TERMS = {
     "speyside", "highland", "highlands", "islay", "lowlands",
 }
 
+_REGION_TERMS_NORMALIZED = {
+    re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        unicodedata.normalize("NFD", term).encode("ascii", "ignore").decode("ascii").lower(),
+    ).strip()
+    for term in _REGION_TERMS
+}
+
+_CLASSIFICATION_PATTERNS = [
+    r"\b(?:premier|1er|1ere|1ère|deuxieme|deuxième|2eme|2ème|troisieme|troisième|3eme|3ème|quatrieme|quatrième|4eme|4ème|cinquieme|cinquième|5eme|5ème)\s+cru\s+(?:classe|classe|classé|superieur|supérieur)?\b",
+    r"\bpremier\s+cru\s+(?:superieur|supérieur)\b",
+    r"\bpremier\s+[ab]\b",
+    r"\bgrand\s+cru\b",
+    r"\bgrand\s+cru\s+(?:classe|classé)\b",
+    r"\bcru\s+(?:classe|classé)\b",
+]
+
+_SEARCH_DESCRIPTOR_PATTERNS = [
+    r"\b(?:rouge|red)\b",
+    r"\b(?:blanc|white)\b",
+    r"\b(?:rose|rosé)\b",
+]
+
 def _is_region_term(s: str) -> bool:
     """Return True if s looks like a wine region/classification, not a specific cru."""
-    return s.strip().lower() in _REGION_TERMS
+    normalized = re.sub(r"[^a-z0-9]+", " ", _normalize(str(s or "")).lower()).strip()
+    return normalized in _REGION_TERMS_NORMALIZED
 
 def _normalize(s: str) -> str:
     """Strip accents: 'FolatiÃ¨res' â†’ 'Folatieres'."""
     return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode("ascii")
+
+
+def _strip_classification_noise(text: str) -> str:
+    value = re.sub(r"\s+", " ", str(text or "")).strip(" ,")
+    if not value:
+        return ""
+    for pattern in _CLASSIFICATION_PATTERNS:
+        value = re.sub(pattern, " ", value, flags=re.I)
+    value = re.sub(r"\b(?:1er|1ere|1ère|2eme|2ème|3eme|3ème|4eme|4ème|5eme|5ème)\b", " ", value, flags=re.I)
+    value = re.sub(r"\s+", " ", value).strip(" ,")
+    return value
+
+
+def _strip_search_descriptor_noise(text: str) -> str:
+    value = _strip_classification_noise(text)
+    if not value:
+        return ""
+    for pattern in _SEARCH_DESCRIPTOR_PATTERNS:
+        value = re.sub(pattern, " ", value, flags=re.I)
+    value = re.sub(r"\s+", " ", value).strip(" ,")
+    return value
+
+
+def _split_embedded_house_reference(text: str) -> tuple[str, str]:
+    value = re.sub(r"\s+", " ", str(text or "")).strip(" ,")
+    if not value:
+        return "", ""
+    m = re.match(r"^(?P<cuvee>.+?)\s+(?:de|d'|des|du|a|à)\s+(?P<house>.+)$", value, flags=re.I)
+    if not m:
+        return value, ""
+    cuvee = re.sub(r"\s+", " ", m.group("cuvee") or "").strip(" ,")
+    house = re.sub(r"\s+", " ", m.group("house") or "").strip(" ,")
+    return value, house if cuvee and house else ""
 
 def _name_tokens(s: str) -> set:
     """Meaningful lowercase tokens (>2 chars, no stop-words, no years, no accents)."""
@@ -443,7 +508,7 @@ def _soft_overlap_count(q_tok: set, h_tok: set) -> int:
 
 
 def _producer_head_tokens(name: str) -> set:
-    part = (name or "").split(",")[0]
+    part = _strip_classification_noise((name or "").split(",")[0])
     return _name_tokens(part)
 
 
@@ -451,9 +516,10 @@ def _query_specific_tokens(name: str) -> set:
     parts = [p.strip() for p in (name or "").split(",") if p.strip()]
     if len(parts) >= 3:
         c = parts[1] if _is_region_term(parts[-1]) else parts[-1]
+        c = _strip_classification_noise(c)
         return _name_tokens(c)
     if len(parts) >= 2:
-        return _name_tokens(parts[1])
+        return _name_tokens(_strip_classification_noise(parts[1]))
     return set()
 
 
@@ -626,7 +692,9 @@ def _normalize_search_name(wine_name: str, vintage: str = "") -> str:
         name = re.sub(rf"(?:,?\s+|\s*\()\b{re.escape(vintage)}\b(?:\))?\s*$", "", name, flags=re.I).strip(" ,")
     name = re.sub(r",?\s*\b(?:NV|N/V)\b\s*$", "", name, flags=re.I).strip(" ,")
     name = re.sub(r"(?:,|\s)\d{5,}\s*$", "", name).strip(" ,")
-    return name
+    parts = [_strip_classification_noise(part) for part in name.split(",")]
+    parts = [re.sub(r"\s+", " ", part).strip(" ,") for part in parts if str(part or "").strip(" ,")]
+    return ", ".join(parts)
 
 
 def _hint_query_from_url(url: str) -> str:
@@ -735,10 +803,31 @@ def _build_search_queries(base_name: str, vintage: str, lwin: str = "", search_h
         _add(f"{base_name} {vintage}")
     _add(base_name)
 
+    if len(parts) >= 3 and _is_region_term(parts[-1]):
+        producer = _strip_classification_noise(parts[0])
+        wine_part = _strip_classification_noise(parts[1])
+        if producer and wine_part:
+            if vintage and vintage != "NV":
+                _add(f"{producer} {wine_part} {vintage}")
+            _add(f"{producer} {wine_part}")
+            _add(wine_part)
+        if producer:
+            if vintage and vintage != "NV":
+                _add(f"{producer} {vintage}")
+            _add(producer)
+
     if len(parts) == 2 and _is_region_term(parts[1]):
+        left = _strip_classification_noise(parts[0])
+        embedded_name, embedded_house = _split_embedded_house_reference(left)
         if vintage and vintage != "NV":
-            _add(f"{parts[0]} {vintage}")
-        _add(parts[0])
+            _add(f"{left or parts[0]} {vintage}")
+        _add(left or parts[0])
+        if embedded_house:
+            if vintage and vintage != "NV":
+                _add(f"{embedded_house} {vintage}")
+                _add(f"{embedded_name} {vintage}")
+            _add(embedded_house)
+            _add(embedded_name)
 
     seen: set[str] = set()
     ordered: List[str] = []
@@ -761,15 +850,24 @@ def _parse_query_structured(query_name: str, query_vintage: str) -> Dict[str, An
     appellation = ""
 
     if len(parts) >= 3:
-        producer, wine, appellation = parts[0], parts[1], parts[2]
+        producer, wine, appellation = (
+            _strip_classification_noise(parts[0]),
+            _strip_classification_noise(parts[1]),
+            parts[2],
+        )
     elif len(parts) == 2:
-        producer = parts[0]
+        left_clean = _strip_classification_noise(parts[0])
+        embedded_wine, embedded_house = _split_embedded_house_reference(left_clean)
         if _is_region_term(parts[1]):
+            producer = embedded_house or left_clean
             appellation = parts[1]
+            if embedded_house:
+                wine = embedded_wine
         else:
-            wine = parts[1]
+            producer = left_clean
+            wine = _strip_classification_noise(parts[1])
     elif parts:
-        wine = parts[0]
+        wine = _strip_classification_noise(parts[0])
 
     lead = producer or wine or cleaned
     tail_parts = [p for p in [wine, appellation] if p]
@@ -850,13 +948,6 @@ def _jr_candidate_passes(parsed_queries: List[Dict[str, Any]], candidate: Dict[s
 
     scores = [_candidate_prerank_score(parsed, candidate) for parsed in parsed_queries]
     best_score = max(scores) if scores else -9999.0
-    if best_score < JR_PLAUSIBLE_MIN_RANK:
-        _jr_debug(
-            f"candidate rejected: score={best_score:.2f} < min={JR_PLAUSIBLE_MIN_RANK:.2f} "
-            f"hit={str(candidate.get('match_text') or '')[:120]!r}"
-        )
-        return False
-
     best_query = parsed_queries[scores.index(best_score)]
     match_text = str(candidate.get("match_text") or "")
     producer = str(candidate.get("producer") or "")
@@ -870,6 +961,24 @@ def _jr_candidate_passes(parsed_queries: List[Dict[str, Any]], candidate: Dict[s
     app_cov = _token_coverage(best_query.get("appellation", ""), wine_plus_app or match_text) if best_query.get("appellation") else 0.0
     tail_query = " ".join(best_query.get("tail_parts") or [])
     tail_cov = _token_coverage(tail_query, wine_plus_app or match_text) if tail_query else 0.0
+    lead_cov = _token_coverage(best_query.get("lead", ""), match_text) if best_query.get("lead") else 0.0
+
+    dynamic_min_rank = JR_PLAUSIBLE_MIN_RANK
+    if best_query.get("producer"):
+        if producer_cov >= 0.70 and max(wine_cov, app_cov, tail_cov) >= 0.30:
+            dynamic_min_rank = min(dynamic_min_rank, 18.0)
+        elif producer_cov >= 0.55 and max(wine_cov, app_cov, tail_cov) >= 0.45:
+            dynamic_min_rank = min(dynamic_min_rank, 24.0)
+    elif lead_cov >= 0.80:
+        dynamic_min_rank = min(dynamic_min_rank, 20.0)
+
+    if best_score < dynamic_min_rank:
+        _jr_debug(
+            f"candidate rejected: score={best_score:.2f} < min={dynamic_min_rank:.2f} "
+            f"(producer={producer_cov:.2f}, wine={wine_cov:.2f}, app={app_cov:.2f}, tail={tail_cov:.2f}) "
+            f"hit={str(candidate.get('match_text') or '')[:120]!r}"
+        )
+        return False
 
     if best_query.get("producer"):
         if producer_cov == 0 and max(wine_cov, app_cov, tail_cov) < 0.34:
@@ -1535,57 +1644,240 @@ def _fetch_full_page(session: requests.Session, url: str) -> Dict:
     if not url:
         return {}
     _prime_jr_session(session)
+    attempts = max(1, int(JR_NOTE_RETRY_ATTEMPTS or 1))
+    sleep_sec = max(0.0, float(JR_NOTE_RETRY_SLEEP_SEC or 0.0))
+    last_result: Dict[str, Any] = {}
+
+    for attempt in range(1, attempts + 1):
+        try:
+            r = session.get(
+                url,
+                timeout=15,
+                headers=_jr_html_headers(JR_ORIGIN + "/tastings"),
+                allow_redirects=True,
+            )
+            r.raise_for_status()
+        except Exception as e:
+            print(f"    [HTML ERR] {url} -> {e}")
+            return last_result or {}
+        _raise_if_cloudflare_block(r, "JR review page")
+
+        soup   = BeautifulSoup(r.text, "html.parser")
+        result: Dict[str, Any] = {}
+
+        # Score
+        se = soup.find("div", class_="tastingNoteScore")
+        if se:
+            sp = se.find("span")
+            if sp:
+                try:
+                    result["score_20"] = float(sp.get_text(strip=True))
+                    result["score"]    = round(result["score_20"] * 5.0, 1)
+                except ValueError:
+                    pass
+
+        # Full note
+        nd = (soup.find("div", class_="tastingNotePage__body")
+              or soup.find("div", class_="tasting-note-body")
+              or soup.find("div", class_="field--name-field-tasting-note"))
+        if nd:
+            note = " ".join(p.get_text(strip=True) for p in nd.find_all("p") if p.get_text(strip=True))
+            note = re.sub(r"\s+", " ", note).strip()
+            if note:
+                result["tasting_note"] = note
+
+        if _jr_is_teaser_text(result.get("tasting_note")):
+            result.pop("tasting_note", None)
+
+        # Reviewer
+        rl = soup.find("a", href=re.compile(r"/author/|/writers/"))
+        if rl:
+            result["reviewer"] = rl.get_text(strip=True)
+
+        # Drink window
+        dt = soup.find(string=re.compile(r"\b(19|20)\d{2}\s*[-\u2013]\s*(19|20)\d{2}\b"))
+        if dt:
+            m = re.search(r"(\d{4})\s*[-\u2013]\s*(\d{4})", dt)
+            if m:
+                result["drink_from"] = int(m.group(1))
+                result["drink_to"]   = int(m.group(2))
+
+        embedded = _extract_jr_embedded_page_data(soup)
+        if embedded.get("score_20") is not None and result.get("score_20") is None:
+            result["score_20"] = embedded["score_20"]
+            result["score"] = round(float(embedded["score_20"]) * 5.0, 1)
+        if embedded.get("tasting_note") and not result.get("tasting_note"):
+            result["tasting_note"] = embedded["tasting_note"]
+        if embedded.get("reviewer") and not result.get("reviewer"):
+            result["reviewer"] = embedded["reviewer"]
+        if embedded.get("drink_from") and not result.get("drink_from"):
+            result["drink_from"] = embedded["drink_from"]
+        if embedded.get("drink_to") and not result.get("drink_to"):
+            result["drink_to"] = embedded["drink_to"]
+
+        last_result = result
+        has_score = result.get("score_20") is not None
+        has_note = bool(str(result.get("tasting_note") or "").strip())
+        should_retry = has_score and not has_note and attempt < attempts
+        if should_retry:
+            if JR_DEBUG_SEARCH:
+                _jr_debug(
+                    f"detail fetch retry {attempt}/{attempts} for {url!r}: "
+                    "score found but note still blocked/blank"
+                )
+            time.sleep(sleep_sec)
+            continue
+        return result
+
+    return last_result
+
+
+_JR_TEASER_PREFIXES = (
+    "become a member",
+    "subscribe now",
+    "to see the full tasting note",
+    "you need to be a premium subscriber",
+    "access more than",
+)
+
+_JR_NOTE_KEYS = {
+    "tasting_note", "tastingnote", "tasting note", "note", "review",
+    "reviewtext", "review_text", "body", "content", "description",
+    "consolidated_review",
+}
+_JR_REVIEWER_KEYS = {"reviewer", "author", "writer", "judge", "critic", "taster", "name"}
+_JR_DRINK_FROM_KEYS = {"drink_from", "drinkfrom", "from"}
+_JR_DRINK_TO_KEYS = {"drink_to", "drinkto", "to"}
+_JR_SCORE_KEYS = {"score_20", "score20", "score", "rounded_score", "average_score"}
+
+
+def _jr_is_teaser_text(text: Any) -> bool:
+    low = re.sub(r"\s+", " ", str(text or "")).strip().lower()
+    if not low:
+        return False
+    return any(low.startswith(prefix) for prefix in _JR_TEASER_PREFIXES)
+
+
+def _jr_clean_text(text: Any) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def _jr_maybe_year(value: Any) -> Optional[int]:
+    m = re.search(r"\b(19|20)\d{2}\b", str(value or ""))
+    if not m:
+        return None
     try:
-        r = session.get(
-            url,
-            timeout=15,
-            headers=_jr_html_headers(JR_ORIGIN + "/tastings"),
-            allow_redirects=True,
-        )
-        r.raise_for_status()
-    except Exception as e:
-        print(f"    [HTML ERR] {url} -> {e}")
-        return {}
-    _raise_if_cloudflare_block(r, "JR review page")
+        return int(m.group(0))
+    except ValueError:
+        return None
 
-    soup   = BeautifulSoup(r.text, "html.parser")
-    result: Dict[str, Any] = {}
 
-    # Score
-    se = soup.find("div", class_="tastingNoteScore")
-    if se:
-        sp = se.find("span")
-        if sp:
-            try:
-                result["score_20"] = float(sp.get_text(strip=True))
-                result["score"]    = round(result["score_20"] * 5.0, 1)
-            except ValueError:
-                pass
+def _jr_maybe_score_20(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        m = re.search(r"(\d+(?:\.\d+)?)", str(value))
+        if not m:
+            return None
+        try:
+            score = float(m.group(1))
+        except ValueError:
+            return None
+    if 0 < score <= 20:
+        return score
+    if 50 <= score <= 100:
+        return round(score / 5.0, 2)
+    return None
 
-    # Full note
-    nd = (soup.find("div", class_="tastingNotePage__body")
-          or soup.find("div", class_="tasting-note-body")
-          or soup.find("div", class_="field--name-field-tasting-note"))
-    if nd:
-        note = " ".join(p.get_text(strip=True) for p in nd.find_all("p") if p.get_text(strip=True))
-        note = re.sub(r"\s+", " ", note).strip()
-        if note:
-            result["tasting_note"] = note
 
-    # Reviewer
-    rl = soup.find("a", href=re.compile(r"/author/|/writers/"))
-    if rl:
-        result["reviewer"] = rl.get_text(strip=True)
-
-    # Drink window
-    dt = soup.find(string=re.compile(r"\b(19|20)\d{2}\s*[-\u2013]\s*(19|20)\d{2}\b"))
-    if dt:
-        m = re.search(r"(\d{4})\s*[-\u2013]\s*(\d{4})", dt)
+def _jr_parse_embedded_script_payload(text: str) -> List[Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    candidates: List[str] = [raw]
+    for pattern in (
+        r"__NEXT_DATA__\s*=\s*(\{.*\})",
+        r"drupalSettings\s*=\s*(\{.*\})",
+        r"window\.__[A-Za-z0-9_]+\s*=\s*(\{.*\})",
+    ):
+        m = re.search(pattern, raw, flags=re.S)
         if m:
-            result["drink_from"] = int(m.group(1))
-            result["drink_to"]   = int(m.group(2))
+            candidates.append(m.group(1))
+    parsed: List[Any] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = candidate[:200]
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            parsed.append(json.loads(candidate))
+        except Exception:
+            continue
+    return parsed
 
-    return result
+
+def _jr_walk_embedded_data(node: Any, out: Dict[str, Any], parent_key: str = "") -> None:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            norm_key = re.sub(r"[^a-z0-9]+", "_", str(key or "").lower()).strip("_")
+            _jr_walk_embedded_data(value, out, norm_key)
+
+            if isinstance(value, str):
+                clean = _jr_clean_text(value)
+                if not clean:
+                    continue
+                if norm_key in _JR_NOTE_KEYS and len(clean) >= 40 and not _jr_is_teaser_text(clean):
+                    current = str(out.get("tasting_note") or "")
+                    if len(clean) > len(current):
+                        out["tasting_note"] = clean
+                elif norm_key in _JR_REVIEWER_KEYS and len(clean) <= 80 and " " in clean and not out.get("reviewer"):
+                    out["reviewer"] = clean
+                elif norm_key in _JR_DRINK_FROM_KEYS and out.get("drink_from") is None:
+                    year = _jr_maybe_year(clean)
+                    if year:
+                        out["drink_from"] = year
+                elif norm_key in _JR_DRINK_TO_KEYS and out.get("drink_to") is None:
+                    year = _jr_maybe_year(clean)
+                    if year:
+                        out["drink_to"] = year
+            elif isinstance(value, (int, float)):
+                if norm_key in _JR_SCORE_KEYS and out.get("score_20") is None:
+                    score = _jr_maybe_score_20(value)
+                    if score is not None:
+                        out["score_20"] = score
+                elif norm_key in _JR_DRINK_FROM_KEYS and out.get("drink_from") is None:
+                    year = _jr_maybe_year(value)
+                    if year:
+                        out["drink_from"] = year
+                elif norm_key in _JR_DRINK_TO_KEYS and out.get("drink_to") is None:
+                    year = _jr_maybe_year(value)
+                    if year:
+                        out["drink_to"] = year
+    elif isinstance(node, list):
+        for item in node:
+            _jr_walk_embedded_data(item, out, parent_key)
+
+
+def _extract_jr_embedded_page_data(soup: BeautifulSoup) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "score_20": None,
+        "tasting_note": "",
+        "reviewer": "",
+        "drink_from": None,
+        "drink_to": None,
+    }
+    for script in soup.find_all("script"):
+        text = script.string or script.get_text(" ", strip=False) or ""
+        if not text:
+            continue
+        for payload in _jr_parse_embedded_script_payload(text):
+            _jr_walk_embedded_data(payload, out)
+    if _jr_is_teaser_text(out.get("tasting_note")):
+        out["tasting_note"] = ""
+    return out
 
 
 def _extract_tastings_rows(soup: BeautifulSoup) -> List[Any]:
@@ -1988,8 +2280,12 @@ def search_wine(
     )
     reviews: List[Dict[str, Any]] = []
     seen_urls: set[str] = set()
+    scored_reviews = 0
     for idx, candidate in enumerate(candidates):
-        review = _jr_review_from_es_candidate(session, candidate, fetch_full=(idx == 0))
+        # ES hits often include note metadata but omit score_number. Fetch details for the
+        # top few candidates, and keep going until we land at least one scored review.
+        fetch_full = idx < JR_DETAIL_FETCH_CANDIDATES or scored_reviews == 0
+        review = _jr_review_from_es_candidate(session, candidate, fetch_full=fetch_full)
         if not review:
             continue
         review_url = str(review.get("review_url") or "").strip()
@@ -1998,6 +2294,24 @@ def search_wine(
         if review_url:
             seen_urls.add(review_url)
         reviews.append(review)
+        if review.get("score_20") is not None:
+            scored_reviews += 1
+
+    if not scored_reviews:
+        _jr_debug("ES candidates yielded no scored reviews; trying tastings HTML fallback")
+        fallback_reviews = _search_tastings_page(session, norm_name, norm_vintage, search_hints=search_hints)
+        if fallback_reviews:
+            seen_urls = {str(r.get("review_url") or "").strip() for r in reviews if r.get("review_url")}
+            for review in fallback_reviews:
+                review_url = str(review.get("review_url") or "").strip()
+                if review_url and review_url in seen_urls:
+                    continue
+                if review_url:
+                    seen_urls.add(review_url)
+                reviews.append(review)
+            _jr_debug(
+                f"fallback merged reviews={[(r.get('wine_name_jr'), r.get('score_20')) for r in reviews[:5]]}"
+            )
 
     reviews.sort(key=lambda x: (str(x.get("date_tasted") or ""), float(x.get("score_20") or -9999.0)), reverse=True)
     _jr_debug(

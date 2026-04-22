@@ -43,6 +43,7 @@ export default function UploadCSV() {
   const [xlsxSource, setXlsxSource] = useState('robertparker');
   const [xlsxJobs, setXlsxJobs] = useState([]);
   const [xlsxStartItem, setXlsxStartItem] = useState('1');
+  const [xlsxLwinFilter, setXlsxLwinFilter] = useState('');
 
   const inputRef = useRef(null);
   const sourceInputRefs = useRef({});
@@ -144,14 +145,20 @@ export default function UploadCSV() {
       fileName: j.fileName || '',
       source: j.source || '',
     }));
-    if (compact.length > 0) sessionStorage.setItem(XLSX_JOBS_STORAGE_KEY, JSON.stringify(compact));
-    else sessionStorage.removeItem(XLSX_JOBS_STORAGE_KEY);
+    if (compact.length > 0) {
+      localStorage.setItem(XLSX_JOBS_STORAGE_KEY, JSON.stringify(compact));
+      sessionStorage.setItem(XLSX_JOBS_STORAGE_KEY, JSON.stringify(compact));
+    } else {
+      localStorage.removeItem(XLSX_JOBS_STORAGE_KEY);
+      sessionStorage.removeItem(XLSX_JOBS_STORAGE_KEY);
+    }
   }, [xlsxJobs]);
 
   useEffect(() => {
     let cancelled = false;
     async function restoreJobs() {
-      const raw = sessionStorage.getItem(XLSX_JOBS_STORAGE_KEY);
+      const raw = localStorage.getItem(XLSX_JOBS_STORAGE_KEY)
+        || sessionStorage.getItem(XLSX_JOBS_STORAGE_KEY);
       if (!raw) return;
 
       let saved = [];
@@ -218,28 +225,39 @@ export default function UploadCSV() {
 
   async function startXlsxJob(file, sourceKey = xlsxSource) {
     const startItem = normalizedStartItem();
-    const d = await xlsxApi.upload(file, apiKey, sourceKey, 2.5, startItem);
+    const d = await xlsxApi.upload(file, apiKey, sourceKey, 2.5, startItem, xlsxLwinFilter);
     if (!d?.ok) {
       addToast(d?.error || `Upload failed for ${file.name} (${getSourceLabel(sourceKey)})`, 'error');
       return;
     }
 
+    const selectedTotal = d.total || 0;
+    const originalTotal = d.file_total || selectedTotal;
     const job = {
       jobId: d.job_id,
       fileName: file.name,
       source: sourceKey,
       status: 'pending',
-      total: d.total || 0,
+      total: selectedTotal,
       done: Math.max(0, (d.start_item || startItem) - 1),
       found: 0,
-      pct: (d.total || 0) > 0 ? Math.round((Math.max(0, (d.start_item || startItem) - 1) / (d.total || 1)) * 1000) / 10 : 0,
+      pct: selectedTotal > 0 ? Math.round((Math.max(0, (d.start_item || startItem) - 1) / selectedTotal) * 1000) / 10 : 0,
       start_item: d.start_item || startItem,
       ready: false,
       error: null,
+      lwin_filter: d.lwin_filter || {},
       log: [],
     };
 
     setXlsxJobs((prev) => [job, ...prev.filter((x) => x.jobId !== job.jobId)]);
+    if (d?.lwin_filter?.enabled) {
+      const invalidCount = (d.lwin_filter.invalid_values || []).length;
+      const unmatchedCount = (d.lwin_filter.unmatched_values || []).length;
+      let msg = `Started ${selectedTotal} selected row(s) from ${originalTotal} total row(s).`;
+      if (invalidCount) msg += ` Ignored ${invalidCount} invalid LWIN value(s).`;
+      if (unmatchedCount) msg += ` ${unmatchedCount} requested LWIN(s) were not present in the file.`;
+      addToast(msg, 'info');
+    }
     startPolling(job.jobId);
   }
 
@@ -447,6 +465,19 @@ export default function UploadCSV() {
                 <div className="mt-1 text-[11px] text-[#555]">
                   Leave as <code className="text-teal-500">1</code> to start from the first wine.
                   If a job stopped at <code className="text-teal-500">3598/5301</code>, enter <code className="text-teal-500">3599</code>.
+                </div>
+              </div>
+              <div className="mb-3">
+                <label className="block text-[11px] text-[#666] mb-1.5 uppercase tracking-wider">Only these LWINs (optional)</label>
+                <textarea
+                  value={xlsxLwinFilter}
+                  onChange={(e) => setXlsxLwinFilter(e.target.value)}
+                  className="w-full min-h-[84px] bg-[#0a0a0a] border border-[#2a2a2a] rounded px-2.5 py-2 text-xs text-[#ddd]"
+                  placeholder="10012342020, 10045672019, 1234567"
+                />
+                <div className="mt-1 text-[11px] text-[#555]">
+                  Paste comma-separated LWIN11 or LWIN7 values to process only those wines from the full workbook.
+                  Leave blank to run every row in the file.
                 </div>
               </div>
               {xlsxSources.length > 1 && (

@@ -13,7 +13,14 @@ KEY BUG FIXED HERE:
   different wine, we strip the note (keep the score — which IS correct).
 """
 
+from datetime import datetime
+import logging
+import re
+
 from config.sources import SOURCES
+
+
+logger = logging.getLogger("maaike.normalize")
 
 
 # ─── Per-enrichment-run note deduplication ────────────────────────────────────
@@ -39,6 +46,7 @@ def _note_fingerprint(note: str) -> str | None:
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def normalize_review(source: str, raw: dict, wine_name: str = "",
+                     wine_vintage: str = "",
                      flag_duplicate_notes: bool = True) -> dict:
     """
     Take a raw scraper result and return a normalized review dict
@@ -64,7 +72,8 @@ def normalize_review(source: str, raw: dict, wine_name: str = "",
     score_native, score_20, score_100 = _normalize_scores(scale, raw_score)
 
     # Resolve note
-    note = raw.get("note") or raw.get("tasting_note") or ""
+    raw_note = raw.get("note") or raw.get("tasting_note") or ""
+    note = raw_note
 
     # ── Note deduplication guard ───────────────────────────────────────────
     # JR batch-tasting bug: same note appears for multiple wines in a session.
@@ -72,6 +81,21 @@ def normalize_review(source: str, raw: dict, wine_name: str = "",
     # recently, it's a session-level note, not a wine-specific note → strip it.
     note = _validate_note(note, wine_name, raw.get("date_tasted", ""),
                           raw.get("reviewer", ""), flag_duplicate_notes)
+    drink_from, drink_to, drink_flags = _sanitize_drink_window(
+        raw.get("drink_from"),
+        raw.get("drink_to"),
+        wine_vintage=wine_vintage,
+        wine_name=wine_name,
+    )
+    date_tasted = _normalize_date(raw.get("date_tasted"))
+    quality_flags = []
+    if score_20 is None and score_100 is None:
+        quality_flags.append("missing_score")
+    if not note:
+        quality_flags.append("missing_note")
+    if raw_note and _is_paywall_note(raw_note):
+        quality_flags.append("paywall_note")
+    quality_flags.extend(drink_flags)
 
     return {
         "score_native": score_native,
@@ -80,18 +104,24 @@ def normalize_review(source: str, raw: dict, wine_name: str = "",
         "score_label":  raw.get("score_label"),
         "reviewer":     raw.get("reviewer"),
         "note":         note,
-        "drink_from":   raw.get("drink_from"),
-        "drink_to":     raw.get("drink_to"),
-        "date_tasted":  raw.get("date_tasted"),
+        "drink_from":   drink_from,
+        "drink_to":     drink_to,
+        "date_tasted":  date_tasted,
         "review_url":   raw.get("review_url"),
         "colour":       raw.get("colour") or raw.get("maaike_colour"),
         "wine_name_src": raw.get("wine_name_src") or raw.get("wine_name_jr"),
         "jr_lwin":      raw.get("jr_lwin"),
+        "_quality_flags": quality_flags,
     }
 
 
-def normalize_reviews(source: str, raws: list[dict], wine_name: str = "") -> list[dict]:
-    return [normalize_review(source, r, wine_name=wine_name) for r in raws]
+def normalize_reviews(source: str, raws: list[dict], wine_name: str = "", wine_vintage: str = "") -> list[dict]:
+    return [normalize_review(source, r, wine_name=wine_name, wine_vintage=wine_vintage) for r in raws]
+
+
+def is_paywall_note(note: str) -> bool:
+    """Public helper so callers can detect paywall/teaser content before saving partial data."""
+    return _is_paywall_note(note)
 
 
 # ─── Note validation ──────────────────────────────────────────────────────────
@@ -108,10 +138,18 @@ _PAYWALL_PREFIXES = (
     "upgrade to",
 )
 
+_PAYWALL_SUBSTRINGS = (
+    "jancisrobinson.com",
+)
+
 def _is_paywall_note(note: str) -> bool:
     """Return True if this is a scraper hitting a login wall, not a real note."""
     low = note.strip().lower()
-    return any(low.startswith(p) for p in _PAYWALL_PREFIXES) or len(note.strip()) < 25
+    return (
+        any(low.startswith(p) for p in _PAYWALL_PREFIXES)
+        or any(token in low for token in _PAYWALL_SUBSTRINGS)
+        or len(note.strip()) < 25
+    )
 
 
 def _validate_note(note: str, wine_name: str, date: str,
@@ -131,10 +169,7 @@ def _validate_note(note: str, wine_name: str, date: str,
 
     # Reject paywall/stub notes immediately
     if _is_paywall_note(note):
-        import logging
-        logging.getLogger("maaike.normalize").warning(
-            "PAYWALL NOTE rejected for %r: %r", wine_name, note[:60]
-        )
+        logger.warning("PAYWALL NOTE rejected for %r: %r", wine_name, note[:60])
         return ""
 
     fp = _note_fingerprint(note)
@@ -147,8 +182,7 @@ def _validate_note(note: str, wine_name: str, date: str,
     if key in _seen_note_fingerprints:
         prev_wine = _seen_note_fingerprints[key]
         if prev_wine and prev_wine.strip().lower() != wine_name.strip().lower():
-            import logging
-            logging.getLogger("maaike.normalize").warning(
+            logger.warning(
                 "DUPLICATE NOTE stripped — first seen for %r, now for %r (date=%s)",
                 prev_wine, wine_name, date
             )
@@ -175,6 +209,77 @@ def _normalize_scores(scale: int, raw_score) -> tuple:
         return s, s, round(s * 5.0, 1)
     else:
         return s, round(s / 5.0, 2), s
+
+
+def _normalize_date(value) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    for fmt in (
+        "%Y-%m-%d",
+        "%d %b %Y",
+        "%d %B %Y",
+        "%d/%m/%Y",
+        "%Y/%m/%d",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%z",
+    ):
+        try:
+            return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})", raw)
+    if m:
+        return m.group(1)
+    return raw
+
+
+def _coerce_year(value) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    m = re.search(r"\b(19\d{2}|20\d{2})\b", text)
+    if not m:
+        return None
+    try:
+        year = int(m.group(1))
+    except ValueError:
+        return None
+    return None if year == 1900 else year
+
+
+def _sanitize_drink_window(drink_from, drink_to, wine_vintage: str = "", wine_name: str = "") -> tuple[int | None, int | None, list[str]]:
+    start = _coerce_year(drink_from)
+    end = _coerce_year(drink_to)
+    vintage = _coerce_year(wine_vintage)
+    flags: list[str] = []
+
+    if vintage:
+        if start is not None and start < vintage:
+            logger.warning(
+                "IMPOSSIBLE DRINK_FROM cleared for %r vintage=%s: %s",
+                wine_name, vintage, start
+            )
+            start = None
+            flags.append("invalid_drink_from")
+        if end is not None and end < vintage:
+            logger.warning(
+                "IMPOSSIBLE DRINK_TO cleared for %r vintage=%s: %s",
+                wine_name, vintage, end
+            )
+            end = None
+            flags.append("invalid_drink_to")
+
+    if start is not None and end is not None and start > end:
+        logger.warning(
+            "REVERSED DRINK WINDOW cleared for %r: from=%s to=%s",
+            wine_name, start, end
+        )
+        start = None
+        end = None
+        flags.append("reversed_drink_window")
+
+    return start, end, flags
 
 
 def display_score(source: str, review: dict) -> str:

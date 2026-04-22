@@ -82,6 +82,7 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
   const [probeError, setProbeError] = useState('');
   const [probeSearched, setProbeSearched] = useState(false);
   const logRef = useRef(null);
+  const runningRef = useRef(false);
   const probeNameRef = useRef(null);
   const probeVintageRef = useRef(null);
   const probeLwinRef = useRef(null);
@@ -103,6 +104,46 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
 
   useEffect(() => { loadStatus(); }, [loadStatus]);
 
+  useEffect(() => {
+    runningRef.current = running;
+  }, [running]);
+
+  const loadRunState = useCallback(async () => {
+    try {
+      const d = await enrichApi.status(apiKey);
+      const mine = d?.source === sourceKey;
+      setRunning(Boolean(d?.running && mine));
+      if (mine || (!d?.running && runningRef.current)) {
+        setProgress({
+          pct: d?.pct || 0,
+          done: d?.done || 0,
+          total: d?.total || 0,
+          found: d?.found || 0,
+          errors: d?.errors || 0,
+          last_id: d?.last_id || 0,
+        });
+      }
+      if (!d?.running && runningRef.current) {
+        setIdFrom('');
+        setIdTo('');
+        loadStatus();
+        onStop?.();
+      }
+    } catch {}
+  }, [apiKey, loadStatus, onStop, sourceKey]);
+
+  useEffect(() => {
+    loadRunState();
+  }, [loadRunState]);
+
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = window.setInterval(() => {
+      loadRunState();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [loadRunState, running]);
+
   // ── Socket ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     const sock = getSocket();
@@ -120,9 +161,10 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
     sock.on('enrich_progress', d => {
       const mine = d.source === sourceKey || (d.source == null && running);
       if (!mine) return;
+      setRunning(Boolean(d.running && d.source === sourceKey));
       setProgress({ pct: d.pct || 0, done: d.done || 0, total: d.total || 0,
         found: d.found || 0, errors: d.errors || 0, last_id: d.last_id || 0 });
-      if (!d.running && d.done > 0) {
+      if (!d.running && d.done > 0 && runningRef.current) {
         setRunning(false); setIdFrom(''); setIdTo('');
         addToast(`[${cfg?.short}] Done: ${d.found}/${d.total} found`, 'success');
         loadStatus(); onStop?.();
@@ -568,7 +610,7 @@ function SourceEngine({ sourceKey, cfg, apiKey, addToast, globalRunning, onStart
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { apiKey, addToast, setCurrentPage, setUploadTab } = useApp();
+  const { apiKey, addToast, setCurrentPage } = useApp();
   const [stats,         setStats]         = useState(null);
   const [anyRunning,    setAnyRunning]    = useState(false);
   const [activeSources, setActiveSources] = useState([]);
@@ -637,8 +679,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              setUploadTab('xlsx');
-              setCurrentPage('upload');
+              setCurrentPage('upload', { uploadTab: 'xlsx' });
             }}
             className="px-3 py-1.5 rounded text-xs font-bold border-none cursor-pointer"
             style={{

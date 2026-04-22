@@ -18,6 +18,7 @@ import time
 from typing import Callable
 
 from config.sources import SOURCES
+from models.job_state_model import load_enrich_snapshot, save_enrich_snapshot
 from models.wine_model import (
     get_pending_wines, mark_not_found,
     upsert_reviews, count_pending, clear_wine_source_reviews,
@@ -43,6 +44,68 @@ state = {
     "thread":     None,
     "source_stats": {},   # { source_key: { found, errors, skipped, no_session } }
 }
+_recovery_attempted = False
+
+
+def _snapshot_payload(extra: dict | None = None) -> dict:
+    payload = {
+        "running": bool(state.get("running")),
+        "stop_flag": bool(state.get("stop_flag")),
+        "total": int(state.get("total") or 0),
+        "done": int(state.get("done") or 0),
+        "found": int(state.get("found") or 0),
+        "errors": int(state.get("errors") or 0),
+        "last_id": int(state.get("last_id") or 0),
+        "source": state.get("source"),
+        "scope": state.get("scope") or "pending",
+        "source_stats": state.get("source_stats") or {},
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _save_snapshot(extra: dict | None = None) -> None:
+    try:
+        save_enrich_snapshot(_snapshot_payload(extra))
+    except Exception:
+        pass
+
+
+def _recover_if_needed() -> None:
+    global _recovery_attempted
+    if _recovery_attempted:
+        return
+    _recovery_attempted = True
+    snapshot = load_enrich_snapshot()
+    if not snapshot:
+        return
+    if not snapshot.get("running"):
+        state.update({
+            "running": False,
+            "stop_flag": False,
+            "total": int(snapshot.get("total") or 0),
+            "done": int(snapshot.get("done") or 0),
+            "found": int(snapshot.get("found") or 0),
+            "errors": int(snapshot.get("errors") or 0),
+            "last_id": int(snapshot.get("last_id") or 0),
+            "source": snapshot.get("source"),
+            "scope": snapshot.get("scope") or "pending",
+            "source_stats": snapshot.get("source_stats") or {},
+        })
+        return
+
+    resume_from = int(snapshot.get("resume_from_id") or 0)
+    saved_last = int(snapshot.get("last_id") or 0)
+    start_from = max(resume_from, saved_last + 1 if saved_last > 0 else 0)
+    start_batch(
+        limit=int(snapshot.get("limit") or 0),
+        sleep_sec=float(snapshot.get("sleep_sec") or 3.0),
+        scope=snapshot.get("scope") or "pending",
+        source_filter=snapshot.get("source") or None,
+        start_from_id=start_from,
+        end_at_id=int(snapshot.get("end_at_id") or 0),
+    )
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
@@ -86,7 +149,7 @@ def enrich_one(wine_id: int, name: str, vintage: str, lwin: str,
         try:
             results = _search_source(source_key, session, name, vintage, lwin, sleep_sec)
             if results:
-                normalized = normalize_reviews(source_key, results, wine_name=name)
+                normalized = normalize_reviews(source_key, results, wine_name=name, wine_vintage=vintage)
                 upsert_reviews(wine_id, source_key, normalized)
                 found_any = True
                 ss["found"] += 1
@@ -139,7 +202,7 @@ def test_search_one_source(source_key: str, name: str, vintage: str = "",
                     raise RuntimeError(message)
         return []
 
-    normalized = normalize_reviews(source_key, results, wine_name=name)
+    normalized = normalize_reviews(source_key, results, wine_name=name, wine_vintage=vintage)
     return normalized[:max(1, int(limit))]
 
 
@@ -169,10 +232,21 @@ def start_batch(limit: int = 0, sleep_sec: float = 3.0,
     if state["running"]:
         return False
 
+    limit = int(limit or 0)
+    sleep_sec = float(sleep_sec or 3.0)
+    start_from_id = int(start_from_id or 0)
+    end_at_id = int(end_at_id or 0)
+
     state.update({
         "running": True, "stop_flag": False, "source": source_filter, "scope": scope,
         "total": 0, "done": 0, "found": 0, "errors": 0, "last_id": 0,
         "source_stats": {},
+    })
+    _save_snapshot({
+        "limit": limit,
+        "sleep_sec": sleep_sec,
+        "resume_from_id": start_from_id,
+        "end_at_id": end_at_id,
     })
 
     def _run():
@@ -198,6 +272,13 @@ def start_batch(limit: int = 0, sleep_sec: float = 3.0,
         if no_sessions and len(no_sessions) == len(active):
             _log(on_log, "✗ No sources have valid sessions. Stopping.", "error", source_filter)
             state.update({"running": False})
+            _save_snapshot({
+                "running": False,
+                "limit": limit,
+                "sleep_sec": sleep_sec,
+                "resume_from_id": start_from_id,
+                "end_at_id": end_at_id,
+            })
             _emit(on_progress)
             return
 
@@ -213,10 +294,23 @@ def start_batch(limit: int = 0, sleep_sec: float = 3.0,
         )
         state["total"] = len(wines)
         reset_note_tracking()
+        _save_snapshot({
+            "limit": limit,
+            "sleep_sec": sleep_sec,
+            "resume_from_id": start_from_id,
+            "end_at_id": end_at_id,
+        })
 
         if not wines:
             _log(on_log, "✓ No pending wines — nothing to do.", "success", source_filter)
             state.update({"running": False, "stop_flag": False})
+            _save_snapshot({
+                "running": False,
+                "limit": limit,
+                "sleep_sec": sleep_sec,
+                "resume_from_id": start_from_id,
+                "end_at_id": end_at_id,
+            })
             _emit(on_progress)
             return
 
@@ -250,6 +344,12 @@ def start_batch(limit: int = 0, sleep_sec: float = 3.0,
 
             state["done"]    += 1
             state["last_id"]  = w["id"]
+            _save_snapshot({
+                "limit": limit,
+                "sleep_sec": sleep_sec,
+                "resume_from_id": start_from_id,
+                "end_at_id": end_at_id,
+            })
             _emit(on_progress)
             if idx < len(wines) - 1:
                 time.sleep(sleep_sec)
@@ -257,6 +357,13 @@ def start_batch(limit: int = 0, sleep_sec: float = 3.0,
         # ── Summary ───────────────────────────────────────────────────────
         state.update({"running": False, "stop_flag": False})
         hr = state["found"] / state["total"] * 100 if state["total"] else 0
+        _save_snapshot({
+            "running": False,
+            "limit": limit,
+            "sleep_sec": sleep_sec,
+            "resume_from_id": start_from_id,
+            "end_at_id": end_at_id,
+        })
         _log(on_log, "", "info", source_filter)
         _log(on_log, f"━━ Done: {state['found']}/{state['total']} found ({hr:.1f}%) ━━", "success", source_filter)
 
@@ -278,9 +385,11 @@ def start_batch(limit: int = 0, sleep_sec: float = 3.0,
 
 def stop_batch():
     state["stop_flag"] = True
+    _save_snapshot({"running": bool(state.get("running")), "stop_flag": True})
 
 
 def get_state() -> dict:
+    _recover_if_needed()
     pct = round(state["done"] / state["total"] * 100, 1) if state["total"] else 0
     return {**state, "pct": pct, "thread": None}
 
@@ -290,6 +399,7 @@ def get_source_status() -> dict:
     Return session + stats status for all sources (enabled OR disabled).
     Always returns at least one entry per source so the UI never gets stuck.
     """
+    _recover_if_needed()
     result = {}
     cookie_statuses = get_all_statuses()
     for key, cfg in SOURCES.items():

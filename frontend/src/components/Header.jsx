@@ -5,12 +5,13 @@ const NAV = [
   { id: 'wines',     label: 'Wine List'   },
   { id: 'addwine',   label: 'Add Wine'    },
   { id: 'upload',    label: 'Upload'      },
+  { id: 'xlsxfiles', label: 'XLSX Files'  },
   { id: 'sources',   label: 'Sources'     },
   { id: 'settings',  label: 'Settings'    },
 ];
 
 export default function Header() {
-  const { currentPage, setCurrentPage } = useApp();
+  const { currentPage, setCurrentPage, getPageHref } = useApp();
 
   return (
     <header className="bg-bg2 border-b border-border h-[50px] flex items-center gap-3.5 px-5 sticky top-0 z-50">
@@ -23,9 +24,13 @@ export default function Header() {
 
       <nav className="flex gap-0.5 ml-auto">
         {NAV.map(n => (
-          <button
+          <a
             key={n.id}
-            onClick={() => setCurrentPage(n.id)}
+            href={getPageHref(n.id)}
+            onClick={(e) => {
+              e.preventDefault();
+              setCurrentPage(n.id);
+            }}
             className={`px-3 py-1.5 rounded text-sm border-none transition-all duration-150 cursor-pointer
               ${currentPage === n.id
                 ? 'bg-bg4 text-text1'
@@ -33,7 +38,7 @@ export default function Header() {
               }`}
           >
             {n.label}
-          </button>
+          </a>
         ))}
       </nav>
     </header>

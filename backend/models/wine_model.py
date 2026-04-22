@@ -89,6 +89,59 @@ def init_schema():
             CREATE INDEX IF NOT EXISTS idx_reviews_source  ON reviews(source);
             CREATE INDEX IF NOT EXISTS idx_reviews_score   ON reviews(score_20);
             CREATE INDEX IF NOT EXISTS idx_reviews_reviewer ON reviews(reviewer);
+
+            CREATE TABLE IF NOT EXISTS xlsx_jobs (
+                job_id          TEXT PRIMARY KEY,
+                file_id         TEXT,
+                status          TEXT,
+                source          TEXT,
+                sleep_sec       REAL,
+                total           INTEGER DEFAULT 0,
+                done            INTEGER DEFAULT 0,
+                found           INTEGER DEFAULT 0,
+                start_item      INTEGER DEFAULT 1,
+                start_index     INTEGER DEFAULT 0,
+                initial_found   INTEGER DEFAULT 0,
+                stop_requested  INTEGER DEFAULT 0,
+                auto_stopped    INTEGER DEFAULT 0,
+                error           TEXT,
+                wines_json      TEXT,
+                results_json    TEXT,
+                log_json        TEXT,
+                template_bytes  BLOB,
+                output_bytes    BLOB,
+                created_at      TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS xlsx_files (
+                file_id          TEXT PRIMARY KEY,
+                original_name    TEXT NOT NULL,
+                stored_name      TEXT NOT NULL,
+                original_path    TEXT NOT NULL,
+                output_path      TEXT,
+                source           TEXT,
+                status           TEXT,
+                size_bytes       INTEGER DEFAULT 0,
+                total_rows       INTEGER DEFAULT 0,
+                prefilled_rows   INTEGER DEFAULT 0,
+                done_rows        INTEGER DEFAULT 0,
+                found_rows       INTEGER DEFAULT 0,
+                active_job_id    TEXT,
+                last_job_id      TEXT,
+                last_error       TEXT,
+                created_at       TEXT DEFAULT (datetime('now')),
+                updated_at       TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_xlsx_files_status ON xlsx_files(status);
+            CREATE INDEX IF NOT EXISTS idx_xlsx_files_updated ON xlsx_files(updated_at);
+
+            CREATE TABLE IF NOT EXISTS app_state (
+                state_key       TEXT PRIMARY KEY,
+                state_json      TEXT,
+                updated_at      TEXT DEFAULT (datetime('now'))
+            );
         """)
 
         # Safe migrations — add columns to existing DBs without breaking them
@@ -107,6 +160,9 @@ def init_schema():
             ("score_native", "REAL"),
             ("score_100",    "REAL"),
             ("score_label",  "TEXT"),
+        ])
+        _migrate_add_columns(conn, "xlsx_jobs", [
+            ("file_id", "TEXT"),
         ])
 
         try:
@@ -690,10 +746,10 @@ def get_wines_for_export(filters: dict) -> list:
     """
     where, params = _build_filters(filters)
 
-    # Default: only export wines that have a real score
-    # Both 'found' (score only) and 'downloaded' (score + note) are exported
+    # Default: export only complete review rows.
+    # 'found' rows are useful operationally, but they create score-only exports.
     if not filters.get("status"):
-        extra = """w.enrichment_status IN ('found','downloaded')
+        extra = """w.enrichment_status = 'downloaded'
                    AND EXISTS (
                        SELECT 1 FROM reviews rx
                        WHERE rx.wine_id = w.id AND rx.score_20 IS NOT NULL
