@@ -10,3 +10,5 @@ dashboard.html.bak
 .env
 .env.local
 .env.*.local
+
+data

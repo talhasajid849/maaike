@@ -24,8 +24,11 @@ import re
 import threading
 import time
 import uuid
+import zipfile
+from html import escape as html_escape
 from datetime import datetime
 from pathlib import Path
+from xml.etree import ElementTree as ET
 from typing import Dict, List, Optional
 
 from models.job_state_model import load_xlsx_job, list_xlsx_jobs, save_xlsx_job
@@ -385,6 +388,10 @@ def _preview_wines(wines: List[Dict], limit: int = XLSX_PREVIEW_ROWS) -> List[Di
 
 
 def _summarize_file_record(record: dict) -> dict:
+    has_output = bool(record.get("output_path"))
+    if not has_output and record.get("last_job_id"):
+        job = load_xlsx_job(record.get("last_job_id"))
+        has_output = bool(job and job.get("output_bytes"))
     return {
         "file_id": record["file_id"],
         "original_name": record["original_name"],
@@ -401,7 +408,7 @@ def _summarize_file_record(record: dict) -> dict:
         "last_error": record.get("last_error"),
         "created_at": record.get("created_at"),
         "updated_at": record.get("updated_at"),
-        "has_output": bool(record.get("output_path")),
+        "has_output": has_output,
     }
 
 
@@ -428,6 +435,7 @@ def fill_xlsx(
     wines: Optional[List[Dict]] = None,
     preserve_all_rows: bool = False,
     qa_stats: Optional[Dict[str, int]] = None,
+    cleanup_existing: bool = True,
 ) -> bytes:
     """
     Fill review data into the template XLSX and return the bytes.
@@ -467,7 +475,7 @@ def fill_xlsx(
     notfound_fill = PatternFill("solid", fgColor="7a1e1e")   # visible red
 
     WRITE_FIELDS = ["critic", "score", "drink_from", "drink_to", "review_date", "review", "source_url"]
-    cleared_existing_bad_rows = _sanitize_existing_sheet_rows(ws, hdr_row_num, col_letter)
+    cleared_existing_bad_rows = _sanitize_existing_sheet_rows(ws, hdr_row_num, col_letter) if cleanup_existing else 0
     if qa_stats is not None:
         qa_stats["existing_bad_rows_cleared"] = int(cleared_existing_bad_rows)
 
@@ -510,14 +518,519 @@ def fill_xlsx(
                 if wine.get("prefilled") or (result and result.get("found")):
                     keep_rows.add(row_idx)
         _prune_empty_result_rows(ws, keep_rows)
-    _remove_empty_placeholder_columns(ws, hdr_row_num)
-    duplicate_lwin_rows_removed = _dedupe_rows_by_lwin(ws, hdr_row_num, col_letter)
+    duplicate_lwin_rows_removed = 0
+    if cleanup_existing:
+        _remove_empty_placeholder_columns(ws, hdr_row_num)
+        duplicate_lwin_rows_removed = _dedupe_rows_by_lwin(ws, hdr_row_num, col_letter)
     if qa_stats is not None:
         qa_stats["duplicate_lwin_rows_removed"] = int(duplicate_lwin_rows_removed)
 
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
+
+
+def _xlsx_col_to_num(col: str) -> int:
+    n = 0
+    for ch in str(col or "").upper():
+        if "A" <= ch <= "Z":
+            n = n * 26 + (ord(ch) - 64)
+    return n
+
+
+def _xlsx_cell_ref(col: str, row_idx: int) -> str:
+    return f"{col}{int(row_idx)}"
+
+
+def _xlsx_cell_col(ref: str) -> str:
+    m = re.match(r"([A-Z]+)", str(ref or "").upper())
+    return m.group(1) if m else ""
+
+
+def _xlsx_read_cell_text(cell: ET.Element, shared_strings: list[str], ns: dict) -> str:
+    cell_type = cell.attrib.get("t")
+    if cell_type == "s":
+        v = cell.find("x:v", ns)
+        try:
+            return shared_strings[int(v.text or "0")] if v is not None else ""
+        except Exception:
+            return ""
+    if cell_type == "inlineStr":
+        parts = [t.text or "" for t in cell.findall(".//x:t", ns)]
+        return "".join(parts)
+    v = cell.find("x:v", ns)
+    return str(v.text or "") if v is not None else ""
+
+
+def _xlsx_set_cell_value(cell: ET.Element, value, ns_uri: str) -> None:
+    ref = cell.attrib.get("r")
+    style = cell.attrib.get("s")
+    cell.attrib.clear()
+    if ref:
+        cell.attrib["r"] = ref
+    if style:
+        cell.attrib["s"] = style
+
+    for child in list(cell):
+        cell.remove(child)
+
+    if value is None:
+        value = ""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        v = ET.SubElement(cell, f"{{{ns_uri}}}v")
+        v.text = str(value)
+        return
+
+    cell.attrib["t"] = "inlineStr"
+    inline = ET.SubElement(cell, f"{{{ns_uri}}}is")
+    t = ET.SubElement(inline, f"{{{ns_uri}}}t")
+    text = str(value)
+    if text.strip() != text or "\n" in text:
+        t.attrib["{http://www.w3.org/XML/1998/namespace}space"] = "preserve"
+    t.text = text
+
+
+def _xlsx_get_or_create_cell(row: ET.Element, col: str, row_idx: int, ns_uri: str) -> ET.Element:
+    ref = _xlsx_cell_ref(col, row_idx)
+    for cell in row.findall(f"{{{ns_uri}}}c"):
+        if cell.attrib.get("r") == ref:
+            return cell
+    cell = ET.Element(f"{{{ns_uri}}}c", {"r": ref})
+    cells = row.findall(f"{{{ns_uri}}}c")
+    target = _xlsx_col_to_num(col)
+    inserted = False
+    for idx, existing in enumerate(cells):
+        if _xlsx_col_to_num(_xlsx_cell_col(existing.attrib.get("r", ""))) > target:
+            row.insert(list(row).index(existing), cell)
+            inserted = True
+            break
+    if not inserted:
+        row.append(cell)
+    return cell
+
+
+def fill_xlsx_progress_fast(
+    template_bytes: bytes,
+    results: List[Dict],
+    processed_wines: Optional[List[Dict]] = None,
+) -> bytes:
+    """
+    Fast path for partial progress downloads.
+
+    It edits only the processed result cells in the first worksheet XML and
+    leaves all unrelated workbook content untouched. This avoids openpyxl's
+    expensive full workbook rebuild for large 20k-row templates.
+    """
+    if not results and not processed_wines:
+        return template_bytes
+
+    quick = _fill_xlsx_progress_subset(template_bytes, results, processed_wines)
+    if quick:
+        return quick
+
+    ET.register_namespace("", "http://schemas.openxmlformats.org/spreadsheetml/2006/main")
+    ns_uri = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    ns = {"x": ns_uri}
+
+    src = io.BytesIO(template_bytes)
+    out = io.BytesIO()
+    with zipfile.ZipFile(src, "r") as zin:
+        shared_strings: list[str] = []
+        if "xl/sharedStrings.xml" in zin.namelist():
+            try:
+                shared_root = ET.fromstring(zin.read("xl/sharedStrings.xml"))
+                for si in shared_root.findall("x:si", ns):
+                    shared_strings.append("".join(t.text or "" for t in si.findall(".//x:t", ns)))
+            except Exception:
+                shared_strings = []
+
+        sheet_name = "xl/worksheets/sheet1.xml"
+        if sheet_name not in zin.namelist():
+            return fill_xlsx(template_bytes, results, preserve_all_rows=True, cleanup_existing=False)
+
+        sheet_root = ET.fromstring(zin.read(sheet_name))
+        sheet_data = sheet_root.find("x:sheetData", ns)
+        if sheet_data is None:
+            return template_bytes
+
+        rows_by_idx = {
+            int(row.attrib.get("r") or 0): row
+            for row in sheet_data.findall("x:row", ns)
+            if str(row.attrib.get("r") or "").isdigit()
+        }
+
+        hdr_row_num = 1
+        for idx in range(1, 6):
+            row = rows_by_idx.get(idx)
+            if row is None:
+                continue
+            vals = [_xlsx_read_cell_text(c, shared_strings, ns).strip().lower() for c in row.findall("x:c", ns)]
+            if any("product" in v or "lwin" in v for v in vals):
+                hdr_row_num = idx
+                break
+
+        col_letter: Dict[str, str] = {}
+        claimed: set[str] = set()
+        header_row = rows_by_idx.get(hdr_row_num)
+        if header_row is not None:
+            for cell in header_row.findall("x:c", ns):
+                col = _xlsx_cell_col(cell.attrib.get("r", ""))
+                if not col or col in claimed:
+                    continue
+                v = _xlsx_read_cell_text(cell, shared_strings, ns).strip()
+                if not v:
+                    continue
+                v_norm = v.lower().replace(" ", "_").replace("-", "_")
+                for field, aliases in _ALIASES.items():
+                    if field not in col_letter and any(a in v_norm for a in aliases):
+                        col_letter[field] = col
+                        claimed.add(col)
+                        break
+
+        def write_fields(row_idx: int, values: dict) -> None:
+            row = rows_by_idx.get(int(row_idx))
+            if row is None:
+                return
+            for field, value in values.items():
+                col = col_letter.get(field)
+                if not col:
+                    continue
+                cell = _xlsx_get_or_create_cell(row, col, int(row_idx), ns_uri)
+                _xlsx_set_cell_value(cell, value, ns_uri)
+
+        for res in results:
+            row_idx = int(res.get("row_idx") or 0)
+            if not row_idx:
+                continue
+            if res.get("found"):
+                write_fields(row_idx, {
+                    "critic": res.get("critic_name") or "",
+                    "score": res.get("score_20"),
+                    "drink_from": res.get("drink_from") or "",
+                    "drink_to": res.get("drink_to") or "",
+                    "review_date": res.get("date_tasted") or "",
+                    "review": res.get("note") or "",
+                    "source_url": res.get("source_url") or "",
+                })
+            elif res.get("clear_existing"):
+                write_fields(row_idx, {
+                    "critic": "",
+                    "score": "",
+                    "drink_from": "",
+                    "drink_to": "",
+                    "review_date": "",
+                    "review": "",
+                    "source_url": "",
+                })
+
+        updated_sheet = ET.tostring(sheet_root, encoding="utf-8", xml_declaration=True)
+
+        # Store entries without recompressing for progress exports. XLSX is a ZIP
+        # container and Excel accepts stored entries; this keeps partial downloads fast.
+        with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_STORED) as zout:
+            for item in zin.infolist():
+                data = updated_sheet if item.filename == sheet_name else zin.read(item.filename)
+                zi = zipfile.ZipInfo(item.filename, date_time=item.date_time)
+                zi.compress_type = zipfile.ZIP_STORED
+                zi.external_attr = item.external_attr
+                zout.writestr(zi, data)
+
+    return out.getvalue()
+
+
+def _copy_cell(src, dst) -> None:
+    dst.value = src.value
+    if src.has_style:
+        from copy import copy
+        dst.font = copy(src.font)
+        dst.fill = copy(src.fill)
+        dst.border = copy(src.border)
+        dst.alignment = copy(src.alignment)
+        dst.number_format = src.number_format
+        dst.protection = copy(src.protection)
+    if src.hyperlink:
+        dst._hyperlink = src.hyperlink
+    if src.comment:
+        from copy import copy
+        dst.comment = copy(src.comment)
+
+
+def _copy_row(ws_src, ws_dst, src_row: int, dst_row: int, max_col: int) -> None:
+    ws_dst.row_dimensions[dst_row].height = ws_src.row_dimensions[src_row].height
+    for col_idx in range(1, max_col + 1):
+        _copy_cell(ws_src.cell(src_row, col_idx), ws_dst.cell(dst_row, col_idx))
+
+
+def _find_header_row(ws) -> int:
+    for row in ws.iter_rows(min_row=1, max_row=min(5, ws.max_row or 5)):
+        vals = [str(c.value or "").strip().lower() for c in row]
+        if any("product" in v or "lwin" in v for v in vals):
+            return row[0].row
+    return 1
+
+
+def _fill_xlsx_progress_subset(
+    template_bytes: bytes,
+    results: List[Dict],
+    processed_wines: Optional[List[Dict]] = None,
+) -> Optional[bytes]:
+    """
+    Create a compact progress workbook with the original header rows plus only
+    processed rows. This avoids surprising users with a 20k-row "progress" file.
+    Final completed exports still use the full workbook path.
+    """
+    if not OPENPYXL_OK:
+        return None
+    processed_rows = sorted({
+        int(row.get("row_idx") or 0)
+        for row in (processed_wines or [])
+        if int(row.get("row_idx") or 0)
+    })
+    if not processed_rows:
+        processed_rows = sorted({int(r.get("row_idx") or 0) for r in results if int(r.get("row_idx") or 0)})
+    if not processed_rows:
+        return template_bytes
+    try:
+        wb = load_workbook(filename=io.BytesIO(template_bytes))
+        ws = wb.active
+        hdr_row_num = _find_header_row(ws)
+        max_col = ws.max_column or 1
+
+        from openpyxl import Workbook
+        out_wb = Workbook()
+        out_ws = out_wb.active
+        out_ws.title = ws.title
+
+        for col_idx in range(1, max_col + 1):
+            letter = ws.cell(1, col_idx).column_letter
+            out_ws.column_dimensions[letter].width = ws.column_dimensions[letter].width
+
+        dst_row = 1
+        for src_row in range(1, hdr_row_num + 1):
+            _copy_row(ws, out_ws, src_row, dst_row, max_col)
+            dst_row += 1
+
+        source_to_dest: dict[int, int] = {}
+        for src_row in processed_rows:
+            if src_row <= hdr_row_num or src_row > (ws.max_row or src_row):
+                continue
+            _copy_row(ws, out_ws, src_row, dst_row, max_col)
+            source_to_dest[src_row] = dst_row
+            dst_row += 1
+
+        subset_results = []
+        for res in results:
+            src_row = int(res.get("row_idx") or 0)
+            dst = source_to_dest.get(src_row)
+            if not dst:
+                continue
+            copied = dict(res)
+            copied["row_idx"] = dst
+            subset_results.append(copied)
+
+        out_bytes = io.BytesIO()
+        out_wb.save(out_bytes)
+        return fill_xlsx(
+            out_bytes.getvalue(),
+            subset_results,
+            preserve_all_rows=True,
+            cleanup_existing=False,
+        )
+    except Exception:
+        return None
+
+
+def _xlsx_inline_cell_xml(ref: str, value) -> str:
+    if value is None:
+        value = ""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f'<c r="{ref}"><v>{value}</v></c>'
+    text = html_escape(str(value), quote=False)
+    preserve = ' xml:space="preserve"' if str(value).strip() != str(value) or "\n" in str(value) else ""
+    return f'<c r="{ref}" t="inlineStr"><is><t{preserve}>{text}</t></is></c>'
+
+
+def _patch_sheet_cell_xml(sheet_xml: str, ref: str, value) -> str:
+    new_cell = _xlsx_inline_cell_xml(ref, value)
+    cell_re = re.compile(rf'<c\b(?=[^>]*\br="{re.escape(ref)}")(?:"[^"]*"|[^>])*?(?:>.*?</c>|/>)', re.S)
+    if cell_re.search(sheet_xml):
+        return cell_re.sub(new_cell, sheet_xml, count=1)
+
+    row_num = int(re.search(r"\d+", ref).group(0))
+    row_re = re.compile(rf'(<row\b(?=[^>]*\br="{row_num}")(?:"[^"]*"|[^>])*?>)(.*?)(</row>)', re.S)
+    m = row_re.search(sheet_xml)
+    if not m:
+        return sheet_xml
+    row_body = m.group(2) + new_cell
+    return sheet_xml[:m.start()] + m.group(1) + row_body + m.group(3) + sheet_xml[m.end():]
+
+
+def _fill_xlsx_progress_text_patch(template_bytes: bytes, results: List[Dict]) -> Optional[bytes]:
+    """
+    Ultra-fast progress writer for known review worksheet layouts.
+
+    The uploaded templates this flow handles use the standard columns:
+    E critic, F score, G drink from, H drink to, I review date, J review,
+    K source URL. We patch only those cells and leave every other byte-level
+    workbook part untouched.
+    """
+    sheet_name = "xl/worksheets/sheet1.xml"
+    field_cols = {
+        "critic": "E",
+        "score": "F",
+        "drink_from": "G",
+        "drink_to": "H",
+        "review_date": "I",
+        "review": "J",
+        "source_url": "K",
+    }
+    try:
+        src = io.BytesIO(template_bytes)
+        out = io.BytesIO()
+        with zipfile.ZipFile(src, "r") as zin:
+            if sheet_name not in zin.namelist():
+                return None
+            sheet_xml = zin.read(sheet_name).decode("utf-8")
+
+            for res in results:
+                row_idx = int(res.get("row_idx") or 0)
+                if not row_idx:
+                    continue
+                if res.get("found"):
+                    values = {
+                        "critic": res.get("critic_name") or "",
+                        "score": res.get("score_20"),
+                        "drink_from": res.get("drink_from") or "",
+                        "drink_to": res.get("drink_to") or "",
+                        "review_date": res.get("date_tasted") or "",
+                        "review": res.get("note") or "",
+                        "source_url": res.get("source_url") or "",
+                    }
+                elif res.get("clear_existing"):
+                    values = {field: "" for field in field_cols}
+                else:
+                    continue
+                for field, value in values.items():
+                    sheet_xml = _patch_sheet_cell_xml(sheet_xml, f"{field_cols[field]}{row_idx}", value)
+
+            updated_sheet = sheet_xml.encode("utf-8")
+            with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_STORED) as zout:
+                for item in zin.infolist():
+                    data = updated_sheet if item.filename == sheet_name else zin.read(item.filename)
+                    zi = zipfile.ZipInfo(item.filename, date_time=item.date_time)
+                    zi.compress_type = zipfile.ZIP_STORED
+                    zi.external_attr = item.external_attr
+                    zout.writestr(zi, data)
+        return out.getvalue()
+    except Exception:
+        return None
+
+
+def _renumber_row_xml(row_xml: str, new_row: int) -> str:
+    row_xml = re.sub(r'(<row\b[^>]*\br=")\d+(")', rf"\g<1>{new_row}\2", row_xml, count=1)
+
+    def repl_cell(match):
+        col = match.group(1)
+        return f'{match.group(2)}{col}{new_row}{match.group(4)}'
+
+    return re.sub(r'((<c\b[^>]*\br=")([A-Z]+))\d+(")', repl_cell, row_xml)
+
+
+def _fill_xlsx_progress_compact_text_patch(template_bytes: bytes, results: List[Dict]) -> Optional[bytes]:
+    """
+    Very fast compact progress workbook.
+
+    Keeps the first two worksheet rows (headers/instructions) and only the
+    processed rows, renumbered sequentially. Then patches the output columns.
+    """
+    processed = []
+    for res in results:
+        row_idx = int(res.get("row_idx") or 0)
+        if row_idx > 2:
+            processed.append((row_idx, res))
+    if not processed:
+        return template_bytes
+
+    sheet_name = "xl/worksheets/sheet1.xml"
+    field_cols = {
+        "critic": "E",
+        "score": "F",
+        "drink_from": "G",
+        "drink_to": "H",
+        "review_date": "I",
+        "review": "J",
+        "source_url": "K",
+    }
+
+    try:
+        src = io.BytesIO(template_bytes)
+        out = io.BytesIO()
+        with zipfile.ZipFile(src, "r") as zin:
+            if sheet_name not in zin.namelist():
+                return None
+            sheet_xml = zin.read(sheet_name).decode("utf-8")
+            row_re = re.compile(r'<row\b(?:"[^"]*"|[^>])*?\br="(\d+)"(?:"[^"]*"|[^>])*?>.*?</row>', re.S)
+            rows = [(int(m.group(1)), m.group(0)) for m in row_re.finditer(sheet_xml)]
+            by_row = {idx: xml for idx, xml in rows}
+            if not by_row:
+                return None
+
+            kept_rows = []
+            for idx in sorted(i for i in by_row if i <= 2):
+                kept_rows.append(_renumber_row_xml(by_row[idx], idx))
+
+            result_dest_rows: dict[int, int] = {}
+            dest_row = len(kept_rows) + 1
+            for src_row, _res in sorted(processed, key=lambda item: item[0]):
+                row_xml = by_row.get(src_row)
+                if not row_xml:
+                    continue
+                kept_rows.append(_renumber_row_xml(row_xml, dest_row))
+                result_dest_rows[src_row] = dest_row
+                dest_row += 1
+
+            if not result_dest_rows:
+                return None
+
+            sheet_data_re = re.compile(r'(<sheetData>).*?(</sheetData>)', re.S)
+            if not sheet_data_re.search(sheet_xml):
+                return None
+            sheet_xml = sheet_data_re.sub(rf"\1{''.join(kept_rows)}\2", sheet_xml, count=1)
+            max_row = len(kept_rows)
+            sheet_xml = re.sub(r'<dimension ref="[^"]+"', f'<dimension ref="A1:K{max_row}"', sheet_xml, count=1)
+
+            for src_row, res in processed:
+                dst_row = result_dest_rows.get(src_row)
+                if not dst_row:
+                    continue
+                if res.get("found"):
+                    values = {
+                        "critic": res.get("critic_name") or "",
+                        "score": res.get("score_20"),
+                        "drink_from": res.get("drink_from") or "",
+                        "drink_to": res.get("drink_to") or "",
+                        "review_date": res.get("date_tasted") or "",
+                        "review": res.get("note") or "",
+                        "source_url": res.get("source_url") or "",
+                    }
+                elif res.get("clear_existing"):
+                    values = {field: "" for field in field_cols}
+                else:
+                    values = {}
+                for field, value in values.items():
+                    sheet_xml = _patch_sheet_cell_xml(sheet_xml, f"{field_cols[field]}{dst_row}", value)
+
+            updated_sheet = sheet_xml.encode("utf-8")
+            with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_STORED) as zout:
+                for item in zin.infolist():
+                    data = updated_sheet if item.filename == sheet_name else zin.read(item.filename)
+                    zi = zipfile.ZipInfo(item.filename, date_time=item.date_time)
+                    zi.compress_type = zipfile.ZIP_STORED
+                    zi.external_attr = item.external_attr
+                    zout.writestr(zi, data)
+        return out.getvalue()
+    except Exception:
+        return None
 
 
 def create_file_upload(
@@ -712,26 +1225,61 @@ def get_file_download(file_id: str, kind: str = "original") -> Optional[Dict]:
     record = get_xlsx_file(file_id)
     if not record:
         return None
+
+    def first_existing(paths: list[Path]) -> Optional[Path]:
+        for path in paths:
+            try:
+                if path and path.exists():
+                    return path
+            except Exception:
+                pass
+        return None
+
     if kind == "output":
         output_path = str(record.get("output_path") or "").strip()
-        if not output_path:
-            return None
-        path = Path(output_path)
-        if not path.exists():
-            return None
         base = Path(record["original_name"]).stem
+        candidates = []
+        if output_path:
+            raw_path = Path(output_path)
+            candidates.extend([raw_path, XLSX_OUTPUT_DIR / raw_path.name])
+        candidates.append(XLSX_OUTPUT_DIR / _safe_storage_name(f"{file_id}_{base}_filled.xlsx"))
+        path = first_existing(candidates)
+        if path:
+            return {
+                "path": str(path),
+                "download_name": f"maaike_{base}_filled.xlsx",
+            }
+
+        job = load_xlsx_job(record.get("last_job_id") or "")
+        if job and job.get("output_bytes"):
+            return {
+                "bytes": job["output_bytes"],
+                "download_name": f"maaike_{base}_filled.xlsx",
+            }
+        return None
+
+    raw_original = str(record.get("original_path") or "").strip()
+    candidates = []
+    if raw_original:
+        original_path = Path(raw_original)
+        candidates.extend([original_path, XLSX_ORIGINAL_DIR / original_path.name])
+    stored_name = str(record.get("stored_name") or "").strip()
+    if stored_name:
+        candidates.append(XLSX_ORIGINAL_DIR / stored_name)
+    path = first_existing(candidates)
+    if path:
         return {
             "path": str(path),
-            "download_name": f"maaike_{base}_filled.xlsx",
+            "download_name": record["original_name"],
         }
 
-    path = Path(record["original_path"])
-    if not path.exists():
-        return None
-    return {
-        "path": str(path),
-        "download_name": record["original_name"],
-    }
+    job = load_xlsx_job(record.get("last_job_id") or "")
+    if job and job.get("template_bytes"):
+        return {
+            "bytes": job["template_bytes"],
+            "download_name": record["original_name"],
+        }
+    return None
 
 
 def delete_file(file_id: str) -> tuple[bool, str]:
@@ -904,6 +1452,8 @@ def get_job(job_id: str) -> Optional[Dict]:
         j = _jobs.get(job_id)
         if not j:
             return None
+        output_path = str(j.get("output_path") or "").strip()
+        ready = j.get("output_bytes") is not None or bool(output_path and Path(output_path).exists())
         return {
             "job_id": job_id,
             "file_id": j.get("file_id"),
@@ -913,9 +1463,10 @@ def get_job(job_id: str) -> Optional[Dict]:
             "found":  j["found"],
             "start_item": int(j.get("start_item") or 1),
             "stop_requested": bool(j.get("stop_requested")),
+            "preparing_output": bool(j.get("preparing_output")),
             "auto_stopped": bool(j.get("auto_stopped")),
             "pct":    round(j["done"] / j["total"] * 100, 1) if j["total"] else 0,
-            "ready":  j["output_bytes"] is not None,
+            "ready":  ready,
             "error":  j["error"],
             "source": j.get("source"),
             "sleep_sec": j.get("sleep_sec"),
@@ -958,17 +1509,33 @@ def get_job_progress_download(job_id: str) -> Optional[Dict]:
         template_bytes = j.get("template_bytes")
         results = list(j.get("results") or [])
         wines = list(j.get("wines") or [])
+        done = int(j.get("done") or 0)
         preserve_all_rows = bool(j.get("preserve_all_rows"))
+        status = j.get("status")
+        existing_output = j.get("output_bytes")
+        existing_output_path = j.get("output_path")
+        compact_progress_ready = j.get("compact_progress_output") == "subset_v4"
+
+    record = get_xlsx_file(str(j.get("file_id") or ""))
+    base = Path(record["original_name"]).stem if record else "reviews"
+
+    if status in ("stopped", "done", "error") and compact_progress_ready:
+        if existing_output_path and Path(existing_output_path).exists():
+            return {
+                "path": str(existing_output_path),
+                "download_name": f"maaike_{base}_progress.xlsx",
+            }
+        if existing_output:
+            return {
+                "bytes": existing_output,
+                "download_name": f"maaike_{base}_progress.xlsx",
+            }
 
     if not template_bytes:
         return None
 
-    output_bytes = fill_xlsx(
-        template_bytes,
-        results,
-        wines,
-        preserve_all_rows=preserve_all_rows,
-    )
+    processed_wines = wines[:done] if done > 0 else []
+    output_bytes = fill_xlsx_progress_fast(template_bytes, results, processed_wines)
     output_path = _job_output_path(job_id, {"file_id": j.get("file_id")})
     if output_path:
         output_path.write_bytes(output_bytes)
@@ -977,13 +1544,12 @@ def get_job_progress_download(job_id: str) -> Optional[Dict]:
         current = _jobs.get(job_id)
         if current:
             current["output_bytes"] = output_bytes
+            current["compact_progress_output"] = "subset_v4"
             if output_path:
                 current["output_path"] = str(output_path)
             _snapshot_job(job_id, current)
 
     if output_path:
-        record = get_xlsx_file(str(j.get("file_id") or ""))
-        base = Path(record["original_name"]).stem if record else "reviews"
         return {
             "path": str(output_path),
             "download_name": f"maaike_{base}_progress.xlsx",
@@ -992,6 +1558,28 @@ def get_job_progress_download(job_id: str) -> Optional[Dict]:
         "bytes": output_bytes,
         "download_name": "maaike_reviews_progress.xlsx",
     }
+
+
+def prepare_job_progress_output(job_id: str) -> bool:
+    _ensure_job_loaded(job_id)
+    with _lock:
+        j = _jobs.get(job_id)
+        if not j:
+            return False
+        if j.get("output_bytes") or j.get("preparing_output"):
+            return True
+        j["preparing_output"] = True
+        _snapshot_job(job_id, j)
+
+    try:
+        get_job_progress_download(job_id)
+    finally:
+        with _lock:
+            current = _jobs.get(job_id)
+            if current:
+                current["preparing_output"] = False
+                _snapshot_job(job_id, current)
+    return True
 
 
 def _stop_requested(job_id: str) -> bool:
@@ -1013,7 +1601,7 @@ def _sleep_or_stop(job_id: str, seconds: float) -> bool:
 
 def request_stop(job_id: str) -> bool:
     _ensure_job_loaded(job_id)
-    should_build_progress = False
+    should_prepare_progress = False
     with _lock:
         j = _jobs.get(job_id)
         if not j:
@@ -1024,14 +1612,12 @@ def request_stop(job_id: str) -> bool:
         j["found"] = int(j.get("initial_found") or 0) + sum(1 for r in (j.get("results") or []) if r.get("found"))
         j["error"] = None
         j.setdefault("log", []).append("Stop requested. Saved current progress for download.")
-        should_build_progress = bool(j.get("template_bytes"))
+        should_prepare_progress = bool(j.get("template_bytes") and not j.get("output_bytes"))
+        j["preparing_output"] = False
         _snapshot_job(job_id, j)
 
-    if should_build_progress:
-        try:
-            get_job_progress_download(job_id)
-        except Exception:
-            pass
+    if should_prepare_progress:
+        threading.Thread(target=prepare_job_progress_output, args=(job_id,), daemon=True).start()
     return True
 
 

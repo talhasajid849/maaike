@@ -40,6 +40,45 @@ function fileStatusTone(status) {
   return 'text-text2';
 }
 
+function ProgressButton({
+  children,
+  pct = 0,
+  active = false,
+  disabled = false,
+  variant = 'outline',
+  className = '',
+  onClick,
+}) {
+  const variants = {
+    teal: 'bg-teal text-bg hover:bg-teal2 font-semibold',
+    red: 'bg-red text-white hover:bg-red/80 font-semibold',
+    outline: 'bg-transparent border border-border2 text-text2 hover:border-teal hover:text-teal',
+    ghost: 'bg-transparent text-text3 hover:text-text1 p-1',
+    blue: 'bg-blue text-white hover:bg-blue/80 font-semibold',
+    yellow: 'bg-yellow text-bg hover:bg-yellow/80 font-semibold',
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`relative inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded text-sm cursor-pointer transition-all duration-150 border-none overflow-hidden disabled:opacity-55 disabled:cursor-not-allowed ${variants[variant] || variants.outline} ${className}`}
+    >
+      {active && (
+        <span
+          className="absolute inset-y-0 left-0 bg-white/25 transition-all duration-300"
+          style={{ width: `${Math.max(8, Math.min(100, pct))}%` }}
+        />
+      )}
+      {active && pct < 100 && (
+        <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse" />
+      )}
+      {active && <span className="absolute inset-0 bg-white/10 animate-pulse" />}
+      <span className="relative z-10">{children}</span>
+    </button>
+  );
+}
+
 export default function XlsxFiles() {
   const { apiKey, addToast } = useApp();
   const [files, setFiles] = useState([]);
@@ -48,6 +87,12 @@ export default function XlsxFiles() {
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [downloadingKind, setDownloadingKind] = useState('');
+  const [downloadPhase, setDownloadPhase] = useState('');
+  const [downloadPct, setDownloadPct] = useState(0);
+  const [downloadElapsed, setDownloadElapsed] = useState(0);
+  const [stopPreparing, setStopPreparing] = useState(false);
+  const [stopPct, setStopPct] = useState(0);
   const [busy, setBusy] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [sourceOptions, setSourceOptions] = useState([]);
@@ -163,6 +208,73 @@ export default function XlsxFiles() {
     }
   }
 
+  function filenameFromDisposition(header, fallback) {
+    const text = String(header || '');
+    const utf = text.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf?.[1]) return decodeURIComponent(utf[1].replace(/"/g, ''));
+    const plain = text.match(/filename="?([^"]+)"?/i);
+    return plain?.[1] || fallback;
+  }
+
+  async function downloadFile(kind) {
+    if (!detail?.file_id) return;
+    setDownloadingKind(kind);
+    setDownloadPhase(kind === 'progress' ? 'Preparing XLSX from current progress...' : 'Preparing download...');
+    setDownloadPct(8);
+    setDownloadElapsed(0);
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      setDownloadElapsed(Math.floor(elapsed / 1000));
+      setDownloadPct((current) => {
+        if (current >= 98) return current;
+        if (elapsed < 7000) {
+          return Math.max(current, Math.min(88, 8 + Math.floor(elapsed / 350) * 4));
+        }
+        const slowNext = 88 + Math.min(10, Math.floor((elapsed - 7000) / 1200));
+        return Math.max(current, Math.min(98, slowNext));
+      });
+    }, 350);
+    try {
+      const res = await fetch(xlsxApi.fileDownloadUrl(detail.file_id, apiKey, kind), {
+        headers: { 'X-API-Key': apiKey },
+      });
+      if (!res.ok) {
+        let message = `Download failed (${res.status})`;
+        try {
+          const payload = await res.json();
+          message = payload?.error || payload?.message || message;
+        } catch {}
+        throw new Error(message);
+      }
+      setDownloadPhase('Downloading file...');
+      setDownloadPct(92);
+      const blob = await res.blob();
+      const fallbackName = kind === 'original' ? detail.original_name : `maaike_${detail.original_name || 'reviews'}`;
+      const filename = filenameFromDisposition(res.headers.get('content-disposition'), fallbackName);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setDownloadPct(100);
+      addToast('Download started', 'success');
+    } catch (e) {
+      addToast(e.message || 'Download failed', 'error');
+    } finally {
+      window.clearInterval(timer);
+      setDownloadingKind('');
+      window.setTimeout(() => {
+        setDownloadPhase('');
+        setDownloadPct(0);
+        setDownloadElapsed(0);
+      }, 450);
+    }
+  }
+
   async function handleUpload(filesList) {
     const picked = Array.from(filesList || []).filter(Boolean);
     if (!picked.length) return;
@@ -202,14 +314,30 @@ export default function XlsxFiles() {
     const jobId = detail?.active_job?.job_id || detail?.active_job_id;
     if (!jobId) return;
     setBusy(true);
+    setStopPreparing(true);
+    setStopPct(Math.max(8, Number(activeJob?.pct || 0)));
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setStopPct((current) => {
+        if (current >= 92) return current;
+        const elapsed = Date.now() - startedAt;
+        return Math.max(current, Math.min(92, 12 + Math.floor(elapsed / 400) * 5));
+      });
+    }, 400);
     try {
       await xlsxApi.stop(jobId, apiKey);
-      addToast('Stop requested for this XLSX job', 'success');
+      setStopPct(100);
+      addToast('Stop requested. Preparing partial XLSX...', 'success');
       await refreshAll(detail.file_id);
     } catch (e) {
       addToast(e.message || 'Failed to stop job', 'error');
     } finally {
+      window.clearInterval(timer);
       setBusy(false);
+      window.setTimeout(() => {
+        setStopPreparing(false);
+        setStopPct(0);
+      }, 600);
     }
   }
 
@@ -272,6 +400,15 @@ export default function XlsxFiles() {
     }
   }
 
+  useEffect(() => {
+    const activeStatus = detail?.active_job?.status;
+    const stillRunning = activeStatus === 'running' || activeStatus === 'pending';
+    if (!stillRunning && stopPreparing) {
+      setStopPreparing(false);
+      setStopPct(0);
+    }
+  }, [detail?.active_job?.status, stopPreparing]);
+
   if (loading) {
     return (
       <div className="flex items-center gap-3 text-text2">
@@ -291,7 +428,12 @@ export default function XlsxFiles() {
   const hasAnyJob = Boolean(detail?.active_job_id || detail?.last_job_id || latestJob?.job_id);
   const isComplete = detail?.status === 'done' || latestStatus === 'done';
   const canDownloadFilled = isComplete && detail?.has_output;
-  const canDownloadProgress = hasAnyJob && !isComplete;
+  const isStopped = latestStatus === 'stopped' || latestStatus === 'error';
+  const canDownloadProgress = hasAnyJob && isStopped && !isRunning && !isComplete && Boolean(latestJob?.ready || detail?.has_output);
+  const backendPreparingOutput = Boolean(latestJob?.preparing_output);
+  const partialPreparing = hasAnyJob && isStopped && !isRunning && !isComplete && !canDownloadProgress && backendPreparingOutput;
+  const canPrepareProgress = hasAnyJob && isStopped && !isRunning && !isComplete && !canDownloadProgress && !backendPreparingOutput;
+  const activeJobPct = Number(activeJob?.pct || fmtPct(detail?.done_rows, detail?.total_rows).replace('%', '') || 0);
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-4">
@@ -415,6 +557,28 @@ export default function XlsxFiles() {
                   </div>
                 )}
 
+                {downloadPhase && (
+                  <div className="rounded border border-teal/40 bg-teal/10 px-3 py-3">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="font-semibold text-teal">{downloadPhase}</span>
+                      <span className="text-text2">
+                        {downloadPct}%{downloadElapsed > 0 ? ` | ${downloadElapsed}s` : ''}
+                      </span>
+                    </div>
+                    <div className="mt-2 h-2 rounded bg-bg4 overflow-hidden">
+                      <div
+                        className="h-full bg-teal transition-all duration-300"
+                        style={{ width: `${downloadPct}%` }}
+                      />
+                    </div>
+                    {downloadPct >= 98 && (
+                      <div className="text-2xs text-text2 mt-2">
+                        Still preparing. Large XLSX files can take a little longer to package.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {isComplete && detail.has_output && (
                   <div className="rounded border border-green/40 bg-green/10 px-3 py-3">
                     <div className="text-sm font-semibold text-green">Filled file ready</div>
@@ -424,19 +588,51 @@ export default function XlsxFiles() {
                   </div>
                 )}
 
+                {isRunning && (
+                  <div className="rounded border border-yellow/40 bg-yellow/10 px-3 py-3">
+                    <div className="text-sm font-semibold text-yellow">Download will be available after stop</div>
+                    <div className="text-2xs text-text2 mt-1">
+                      Use “Stop current job” to prepare a partial XLSX, then download it when the job is stopped.
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-2">
-                  <a href={xlsxApi.fileDownloadUrl(detail.file_id, apiKey, 'original')}>
-                    <Button>Download original</Button>
-                  </a>
+                  <ProgressButton
+                    onClick={() => downloadFile('original')}
+                    disabled={Boolean(downloadingKind)}
+                    active={downloadingKind === 'original'}
+                    pct={downloadPct}
+                  >
+                    {downloadingKind === 'original' ? 'Downloading...' : 'Download original'}
+                  </ProgressButton>
                   {canDownloadFilled && (
-                    <a href={xlsxApi.fileDownloadUrl(detail.file_id, apiKey, 'output')}>
-                      <Button variant="blue">Download filled file</Button>
-                    </a>
+                    <ProgressButton
+                      variant="blue"
+                      onClick={() => downloadFile('output')}
+                      disabled={Boolean(downloadingKind)}
+                      active={downloadingKind === 'output'}
+                      pct={downloadPct}
+                    >
+                      {downloadingKind === 'output' ? 'Downloading...' : 'Download filled file'}
+                    </ProgressButton>
                   )}
-                  {canDownloadProgress && (
-                    <a href={xlsxApi.fileDownloadUrl(detail.file_id, apiKey, 'progress')}>
-                      <Button variant="teal">Download current progress</Button>
-                    </a>
+                  {(canDownloadProgress || partialPreparing || canPrepareProgress) && (
+                    <ProgressButton
+                      variant={(partialPreparing || canPrepareProgress) ? 'yellow' : 'teal'}
+                      onClick={() => (canDownloadProgress || canPrepareProgress) && downloadFile('progress')}
+                      disabled={Boolean(downloadingKind) || partialPreparing}
+                      active={downloadingKind === 'progress' || partialPreparing}
+                      pct={downloadingKind === 'progress' ? downloadPct : Math.max(12, Math.min(95, Number(latestJob?.pct || fmtPct(latestDone, latestTotal).replace('%', '') || 0)))}
+                    >
+                      {downloadingKind === 'progress'
+                        ? 'Preparing partial XLSX...'
+                        : partialPreparing
+                          ? 'Preparing partial XLSX...'
+                          : canPrepareProgress
+                            ? 'Prepare partial XLSX'
+                          : 'Download current progress'}
+                    </ProgressButton>
                   )}
                   <Button variant="ghost" onClick={() => refreshAll(detail.file_id)} disabled={busy}>Refresh</Button>
                   <Button variant="red" onClick={deleteSelectedFile} disabled={busy || isRunning}>Delete file</Button>
@@ -449,7 +645,15 @@ export default function XlsxFiles() {
                     </PanelHeader>
                     <PanelBody className="space-y-3">
                       <div className="flex flex-wrap gap-2">
-                        <Button variant="red" onClick={stopCurrentJob} disabled={busy || !isRunning}>Stop current job</Button>
+                        <ProgressButton
+                          variant="red"
+                          onClick={stopCurrentJob}
+                          disabled={(busy && !stopPreparing) || !isRunning}
+                          active={stopPreparing || isRunning}
+                          pct={stopPreparing ? stopPct : activeJobPct}
+                        >
+                          {stopPreparing ? 'Stopping and preparing...' : 'Stop current job'}
+                        </ProgressButton>
                         <Button variant="teal" onClick={resumeLastJob} disabled={busy || !canResume}>Resume last job</Button>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
