@@ -145,22 +145,43 @@ def list_files():
 def file_detail(file_id: str):
     from services.xlsx_service import get_file_detail
 
-    detail = get_file_detail(file_id)
+    include_preview = (request.args.get("preview") or "1").strip().lower() not in ("0", "false", "no")
+    detail = get_file_detail(file_id, include_preview=include_preview)
     if not detail:
         return jsonify({"ok": False, "error": "File not found"}), 404
     return jsonify({"ok": True, **detail})
 
 
 def file_download(file_id: str):
-    from services.xlsx_service import get_file_download
+    from services.xlsx_service import get_file_detail, get_file_download, get_job_progress_download
 
     kind = (request.args.get("kind") or "original").strip().lower()
-    if kind not in ("original", "output"):
+    if kind not in ("original", "output", "progress"):
         return jsonify({"ok": False, "error": "Invalid download kind"}), 400
 
-    payload = get_file_download(file_id, kind=kind)
+    if kind == "progress":
+        detail = get_file_detail(file_id, include_preview=False)
+        job_id = (
+            (detail.get("active_job") or {}).get("job_id")
+            or detail.get("active_job_id")
+            or (detail.get("last_job") or {}).get("job_id")
+            or detail.get("last_job_id")
+            if detail else None
+        )
+        payload = get_job_progress_download(job_id) if job_id else None
+    else:
+        payload = get_file_download(file_id, kind=kind)
+
     if not payload:
         return jsonify({"ok": False, "error": "File not ready"}), 404
+
+    if payload.get("bytes") is not None:
+        return send_file(
+            io.BytesIO(payload["bytes"]),
+            as_attachment=True,
+            download_name=payload["download_name"],
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     return send_file(
         payload["path"],

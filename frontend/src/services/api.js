@@ -156,7 +156,10 @@ export const xlsxApi = {
   stop:   (jobId, apiKey) => ap(`/xlsx/stop/${jobId}`, { method: 'POST' }, apiKey),
   resume: (jobId, apiKey) => ap(`/xlsx/resume/${jobId}`, { method: 'POST' }, apiKey),
   files:  (apiKey) => ap('/xlsx/files', {}, apiKey),
-  file:   (fileId, apiKey) => ap(`/xlsx/files/${fileId}`, {}, apiKey),
+  file:   (fileId, apiKey, opts = {}) => {
+    const preview = opts.preview === true ? '1' : '0';
+    return ap(`/xlsx/files/${fileId}?preview=${preview}`, {}, apiKey);
+  },
   restartFile: (fileId, data, apiKey) => ap(`/xlsx/files/${fileId}/restart`, {
     method: 'POST',
     body: JSON.stringify(data || {}),

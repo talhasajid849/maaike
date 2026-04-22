@@ -672,21 +672,28 @@ def list_file_records() -> List[Dict]:
     return [_summarize_file_record(row) for row in list_xlsx_files()]
 
 
-def get_file_detail(file_id: str) -> Optional[Dict]:
+def get_file_detail(file_id: str, include_preview: bool = True) -> Optional[Dict]:
     record = get_xlsx_file(file_id)
     if not record:
         return None
 
     detail = _summarize_file_record(record)
-    try:
-        template_bytes = _read_file_bytes(record["original_path"])
-        wines = parse_xlsx(template_bytes)
-        detail["preview_rows"] = _preview_wines(wines)
-        detail["preview_count"] = min(len(wines), XLSX_PREVIEW_ROWS)
-    except Exception as e:
+    if include_preview:
+        try:
+            template_bytes = _read_file_bytes(record["original_path"])
+            wines = parse_xlsx(template_bytes)
+            detail["preview_rows"] = _preview_wines(wines)
+            detail["preview_count"] = min(len(wines), XLSX_PREVIEW_ROWS)
+            detail["preview_deferred"] = False
+        except Exception as e:
+            detail["preview_rows"] = []
+            detail["preview_count"] = 0
+            detail["preview_error"] = str(e)
+            detail["preview_deferred"] = False
+    else:
         detail["preview_rows"] = []
         detail["preview_count"] = 0
-        detail["preview_error"] = str(e)
+        detail["preview_deferred"] = True
 
     jobs = list_file_jobs(file_id)
     detail["jobs"] = jobs
@@ -694,6 +701,10 @@ def get_file_detail(file_id: str) -> Optional[Dict]:
     last_job_id = record.get("last_job_id")
     detail["active_job"] = get_job(active_job_id) if active_job_id else None
     detail["last_job"] = get_job(last_job_id) if last_job_id else None
+    if detail["active_job"] and detail["active_job"].get("status") in ("done", "stopped", "error"):
+        detail["last_job"] = detail["last_job"] or detail["active_job"]
+        detail["active_job"] = None
+        update_xlsx_file(file_id, {"active_job_id": None})
     return detail
 
 
@@ -776,7 +787,7 @@ def _sync_file_record_from_job(job_id: str, job: dict) -> None:
         patch["output_path"] = job.get("output_path")
     if job.get("status") in ("running", "pending"):
         patch["active_job_id"] = job_id
-    elif job.get("active_job_id") == job_id or job.get("status") in ("done", "stopped", "error"):
+    elif job.get("status") in ("done", "stopped", "error"):
         patch["active_job_id"] = None
     update_xlsx_file(file_id, patch)
 
@@ -894,6 +905,7 @@ def get_job(job_id: str) -> Optional[Dict]:
         if not j:
             return None
         return {
+            "job_id": job_id,
             "file_id": j.get("file_id"),
             "status": j["status"],
             "total":  j["total"],
@@ -920,33 +932,107 @@ def get_job_output(job_id: str) -> Optional[bytes]:
         return j["output_bytes"] if j else None
 
 
+def _job_output_path(job_id: str, job: dict) -> Optional[Path]:
+    file_id = str(job.get("file_id") or "").strip()
+    if not file_id:
+        return None
+    record = get_xlsx_file(file_id)
+    if not record:
+        return None
+    output_name = f"{file_id}_{Path(record['original_name']).stem}_filled.xlsx"
+    return XLSX_OUTPUT_DIR / _safe_storage_name(output_name)
+
+
+def get_job_progress_download(job_id: str) -> Optional[Dict]:
+    """
+    Build a downloadable XLSX from the rows processed so far.
+
+    This is intentionally usable while the job is still running, so users can
+    save partial progress before waiting for the background thread to finish.
+    """
+    _ensure_job_loaded(job_id)
+    with _lock:
+        j = _jobs.get(job_id)
+        if not j:
+            return None
+        template_bytes = j.get("template_bytes")
+        results = list(j.get("results") or [])
+        wines = list(j.get("wines") or [])
+        preserve_all_rows = bool(j.get("preserve_all_rows"))
+
+    if not template_bytes:
+        return None
+
+    output_bytes = fill_xlsx(
+        template_bytes,
+        results,
+        wines,
+        preserve_all_rows=preserve_all_rows,
+    )
+    output_path = _job_output_path(job_id, {"file_id": j.get("file_id")})
+    if output_path:
+        output_path.write_bytes(output_bytes)
+
+    with _lock:
+        current = _jobs.get(job_id)
+        if current:
+            current["output_bytes"] = output_bytes
+            if output_path:
+                current["output_path"] = str(output_path)
+            _snapshot_job(job_id, current)
+
+    if output_path:
+        record = get_xlsx_file(str(j.get("file_id") or ""))
+        base = Path(record["original_name"]).stem if record else "reviews"
+        return {
+            "path": str(output_path),
+            "download_name": f"maaike_{base}_progress.xlsx",
+        }
+    return {
+        "bytes": output_bytes,
+        "download_name": "maaike_reviews_progress.xlsx",
+    }
+
+
+def _stop_requested(job_id: str) -> bool:
+    with _lock:
+        j = _jobs.get(job_id)
+        return not j or bool(j.get("stop_requested")) or j.get("status") == "stopped"
+
+
+def _sleep_or_stop(job_id: str, seconds: float) -> bool:
+    remaining = max(0.0, float(seconds or 0.0))
+    while remaining > 0:
+        if _stop_requested(job_id):
+            return True
+        chunk = min(0.25, remaining)
+        time.sleep(chunk)
+        remaining -= chunk
+    return _stop_requested(job_id)
+
+
 def request_stop(job_id: str) -> bool:
     _ensure_job_loaded(job_id)
+    should_build_progress = False
     with _lock:
         j = _jobs.get(job_id)
         if not j:
             return False
         j["stop_requested"] = True
-        if j["status"] == "pending":
-            j["status"] = "stopped"
-            j["output_bytes"] = fill_xlsx(
-                j["template_bytes"],
-                j["results"],
-                j.get("wines"),
-                preserve_all_rows=bool(j.get("preserve_all_rows")),
-            )
-            j["done"] = int(j.get("start_index") or 0) + len(j["results"])
-            j["found"] = int(j.get("initial_found") or 0) + sum(1 for r in j["results"] if r.get("found"))
-            file_id = str(j.get("file_id") or "").strip()
-            if file_id:
-                record = get_xlsx_file(file_id)
-                if record:
-                    output_name = f"{file_id}_{Path(record['original_name']).stem}_filled.xlsx"
-                    output_path = XLSX_OUTPUT_DIR / _safe_storage_name(output_name)
-                    output_path.write_bytes(j["output_bytes"])
-                    j["output_path"] = str(output_path)
+        j["status"] = "stopped"
+        j["done"] = int(j.get("start_index") or 0) + len(j.get("results") or [])
+        j["found"] = int(j.get("initial_found") or 0) + sum(1 for r in (j.get("results") or []) if r.get("found"))
+        j["error"] = None
+        j.setdefault("log", []).append("Stop requested. Saved current progress for download.")
+        should_build_progress = bool(j.get("template_bytes"))
         _snapshot_job(job_id, j)
-        return True
+
+    if should_build_progress:
+        try:
+            get_job_progress_download(job_id)
+        except Exception:
+            pass
+    return True
 
 
 def resume_job(job_id: str) -> tuple[bool, str]:
@@ -965,6 +1051,7 @@ def resume_job(job_id: str) -> tuple[bool, str]:
         j["auto_stopped"] = False
         j["error"] = None
         j["output_bytes"] = None
+        j["output_path"] = None
         _snapshot_job(job_id, j)
         return True, "ok"
 
@@ -1352,6 +1439,8 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
             return
         if j.get("status") == "running":
             return
+        if j.get("stop_requested") or j.get("status") == "stopped":
+            return
         wines = list(j["wines"])
         template_bytes = j["template_bytes"]
         source_key = source_key or (j.get("source") or "jancisrobinson")
@@ -1411,12 +1500,8 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
         log(f"Resuming from row {processed + 1}/{len(wines)}...")
 
     for idx, wine in enumerate(wines[processed:], start=processed + 1):
-        with _lock:
-            if job_id not in _jobs:
-                return
-            if _jobs[job_id].get("stop_requested"):
-                stopped = True
-        if stopped:
+        if _stop_requested(job_id):
+            stopped = True
             log("Stop requested. Finishing current progress for download...")
             break
 
@@ -1433,6 +1518,9 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
             selected_scores = (None, None, None)
             reviews = []
             for attempt in range(1, INCOMPLETE_RETRY_ATTEMPTS + 1):
+                if _stop_requested(job_id):
+                    stopped = True
+                    break
                 reviews = _fetch_reviews_for_attempt(
                     source_key,
                     session,
@@ -1442,6 +1530,9 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
                     sleep_sec,
                     wine.get("search_hints"),
                 )
+                if _stop_requested(job_id):
+                    stopped = True
+                    break
                 if not reviews:
                     selected_review = None
                     selected_reasons = ["not_found"]
@@ -1494,7 +1585,13 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
                     log(
                         f"  - incomplete {source_label} result, retry {attempt}/{INCOMPLETE_RETRY_ATTEMPTS - 1} in {INCOMPLETE_RETRY_SLEEP_SEC:.0f}s"
                     )
-                    time.sleep(INCOMPLETE_RETRY_SLEEP_SEC)
+                    if _sleep_or_stop(job_id, INCOMPLETE_RETRY_SLEEP_SEC):
+                        stopped = True
+                        break
+
+            if stopped:
+                log("Stop requested. Current in-flight row was not marked done.")
+                break
 
             if selected_review and selected_scores[0] is not None and len(str(selected_review.get('note') or '').strip()) >= 25:
                 consecutive_net_errors = 0
@@ -1556,7 +1653,10 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
                 log("Stop requested. Generating partial XLSX...")
             break
 
-        time.sleep(sleep_sec)
+        if _sleep_or_stop(job_id, sleep_sec):
+            stopped = True
+            log("Stop requested. Generating partial XLSX...")
+            break
 
     duplicate_notes_cleared = _strip_duplicate_result_notes(results)
     if duplicate_notes_cleared:
@@ -1618,7 +1718,8 @@ def run_job(job_id: str, source_key: str = "jancisrobinson", sleep_sec: float = 
         f"duplicate_lwin_rows_removed={qa_stats['duplicate_lwin_rows_removed']} | "
         f"existing_bad_rows_cleared={qa_stats['existing_bad_rows_cleared']}"
     )
-    if stopped:
+    if stopped or _stop_requested(job_id):
+        stopped = True
         if auto_stopped:
             log(f"Auto-stopped - processed {start_index + len(results)}/{total}, found {found}. Click Download or Resume.")
         else:

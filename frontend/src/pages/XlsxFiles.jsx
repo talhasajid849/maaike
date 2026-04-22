@@ -46,6 +46,8 @@ export default function XlsxFiles() {
   const [detail, setDetail] = useState(null);
   const [selectedFileId, setSelectedFileId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [sourceOptions, setSourceOptions] = useState([]);
@@ -70,42 +72,51 @@ export default function XlsxFiles() {
         .map(([key, cfg]) => ({ key, label: cfg?.name || sourceLabel(key) }));
       if (options.length) {
         setSourceOptions(options);
-        if (!options.some((s) => s.key === uploadSource)) setUploadSource(options[0].key);
-        if (!options.some((s) => s.key === restartSource)) setRestartSource(options[0].key);
+        setUploadSource((current) => options.some((s) => s.key === current) ? current : options[0].key);
+        setRestartSource((current) => options.some((s) => s.key === current) ? current : options[0].key);
       }
     } catch {}
-  }, [apiKey, restartSource, uploadSource]);
+  }, [apiKey]);
 
   const loadFiles = useCallback(async (preferredId = '') => {
     const d = await xlsxApi.files(apiKey);
     const nextFiles = d?.files || [];
     setFiles(nextFiles);
-    const targetId = preferredId || selectedFileId || nextFiles[0]?.file_id || '';
-    if (targetId) setSelectedFileId(targetId);
     return nextFiles;
-  }, [apiKey, selectedFileId]);
+  }, [apiKey]);
 
-  const loadDetail = useCallback(async (fileId) => {
+  const loadDetail = useCallback(async (fileId, opts = {}) => {
     if (!fileId) {
       setDetail(null);
       return null;
     }
-    const d = await xlsxApi.file(fileId, apiKey);
-    setDetail(d);
-    setRestartSource(d?.source || restartSource || uploadSource || 'robertparker');
-    return d;
-  }, [apiKey, restartSource, uploadSource]);
+    setDetailLoading(opts.preview !== true);
+    try {
+      const d = await xlsxApi.file(fileId, apiKey, { preview: opts.preview === true });
+      setDetail((current) => {
+        if (opts.preview === true) return d;
+        if (current?.file_id === d?.file_id && current?.preview_rows?.length) {
+          return { ...d, preview_rows: current.preview_rows, preview_count: current.preview_count, preview_deferred: false };
+        }
+        return d;
+      });
+      setRestartSource(d?.source || 'robertparker');
+      return d;
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [apiKey]);
 
   useEffect(() => {
     let cancelled = false;
     async function boot() {
       setLoading(true);
       try {
-        await loadSources();
-        const nextFiles = await loadFiles();
+        const [, nextFiles] = await Promise.all([loadSources(), loadFiles()]);
         const initialId = nextFiles[0]?.file_id || '';
         if (!cancelled && initialId) {
-          await loadDetail(initialId);
+          setSelectedFileId(initialId);
+          setLoading(false);
         }
       } catch (e) {
         if (!cancelled) addToast(e.message || 'Failed to load XLSX files', 'error');
@@ -119,7 +130,7 @@ export default function XlsxFiles() {
 
   useEffect(() => {
     if (!selectedFileId) return;
-    loadDetail(selectedFileId).catch(() => {});
+    loadDetail(selectedFileId, { preview: false }).catch(() => {});
   }, [selectedFileId, pollTick, loadDetail]);
 
   useEffect(() => {
@@ -136,8 +147,20 @@ export default function XlsxFiles() {
   async function refreshAll(preferredId = '') {
     const nextFiles = await loadFiles(preferredId);
     const targetId = preferredId || selectedFileId || nextFiles[0]?.file_id || '';
-    if (targetId) await loadDetail(targetId);
+    if (targetId) await loadDetail(targetId, { preview: false });
     else setDetail(null);
+  }
+
+  async function loadPreviewRows() {
+    if (!detail?.file_id) return;
+    setPreviewLoading(true);
+    try {
+      await loadDetail(detail.file_id, { preview: true });
+    } catch (e) {
+      addToast(e.message || 'Failed to load preview rows', 'error');
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   async function handleUpload(filesList) {
@@ -176,7 +199,7 @@ export default function XlsxFiles() {
   }
 
   async function stopCurrentJob() {
-    const jobId = detail?.active_job?.job_id;
+    const jobId = detail?.active_job?.job_id || detail?.active_job_id;
     if (!jobId) return;
     setBusy(true);
     try {
@@ -191,7 +214,7 @@ export default function XlsxFiles() {
   }
 
   async function resumeLastJob() {
-    const jobId = detail?.last_job?.job_id;
+    const jobId = detail?.last_job?.job_id || detail?.active_job?.job_id || detail?.last_job_id || detail?.active_job_id;
     if (!jobId) return;
     setBusy(true);
     try {
@@ -258,8 +281,17 @@ export default function XlsxFiles() {
     );
   }
 
-  const canResume = ['stopped', 'error'].includes(detail?.last_job?.status);
-  const isRunning = ['running', 'pending'].includes(detail?.active_job?.status);
+  const activeJob = detail?.active_job;
+  const latestJob = detail?.last_job || activeJob;
+  const latestStatus = latestJob?.status || detail?.status;
+  const latestDone = Number(latestJob?.done ?? detail?.done_rows ?? 0);
+  const latestTotal = Number(latestJob?.total ?? detail?.total_rows ?? 0);
+  const isRunning = ['running', 'pending'].includes(activeJob?.status);
+  const canResume = ['stopped', 'error'].includes(latestStatus) && (!latestTotal || latestDone < latestTotal);
+  const hasAnyJob = Boolean(detail?.active_job_id || detail?.last_job_id || latestJob?.job_id);
+  const isComplete = detail?.status === 'done' || latestStatus === 'done';
+  const canDownloadFilled = isComplete && detail?.has_output;
+  const canDownloadProgress = hasAnyJob && !isComplete;
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-4">
@@ -347,7 +379,14 @@ export default function XlsxFiles() {
 
       <div>
         {!detail ? (
-          <EmptyState icon="-" message="Select a saved XLSX file to inspect it" />
+          detailLoading ? (
+            <div className="flex items-center gap-3 text-text2">
+              <Spinner />
+              <span>Loading file details...</span>
+            </div>
+          ) : (
+            <EmptyState icon="-" message="Select a saved XLSX file to inspect it" />
+          )
         ) : (
           <div className="space-y-4">
             <Panel>
@@ -376,13 +415,27 @@ export default function XlsxFiles() {
                   </div>
                 )}
 
+                {isComplete && detail.has_output && (
+                  <div className="rounded border border-green/40 bg-green/10 px-3 py-3">
+                    <div className="text-sm font-semibold text-green">Filled file ready</div>
+                    <div className="text-2xs text-text2 mt-1">
+                      The completed XLSX is available below as “Download filled file”.
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-2">
                   <a href={xlsxApi.fileDownloadUrl(detail.file_id, apiKey, 'original')}>
                     <Button>Download original</Button>
                   </a>
-                  {detail.has_output && (
+                  {canDownloadFilled && (
                     <a href={xlsxApi.fileDownloadUrl(detail.file_id, apiKey, 'output')}>
-                      <Button variant="blue">Download filled</Button>
+                      <Button variant="blue">Download filled file</Button>
+                    </a>
+                  )}
+                  {canDownloadProgress && (
+                    <a href={xlsxApi.fileDownloadUrl(detail.file_id, apiKey, 'progress')}>
+                      <Button variant="teal">Download current progress</Button>
                     </a>
                   )}
                   <Button variant="ghost" onClick={() => refreshAll(detail.file_id)} disabled={busy}>Refresh</Button>
@@ -428,11 +481,12 @@ export default function XlsxFiles() {
                       <PanelTitle>Latest Job</PanelTitle>
                     </PanelHeader>
                     <PanelBody className="space-y-2 text-sm">
-                      <div>Status: <span className={fileStatusTone(detail.last_job?.status)}>{detail.last_job?.status || '-'}</span></div>
-                      <div>Source: {sourceLabel(detail.last_job?.source || detail.source)}</div>
-                      <div>Start item: {detail.last_job?.start_item || '-'}</div>
-                      <div>Processed: {detail.last_job?.done ?? detail.done_rows}</div>
-                      <div>Found: {detail.last_job?.found ?? detail.found_rows}</div>
+                      <div>Status: <span className={fileStatusTone(latestStatus)}>{latestStatus || '-'}</span></div>
+                      <div>Source: {sourceLabel(latestJob?.source || detail.source)}</div>
+                      <div>Start item: {latestJob?.start_item || '-'}</div>
+                      <div>Processed: {latestJob?.done ?? detail.done_rows}</div>
+                      <div>Found: {latestJob?.found ?? detail.found_rows}</div>
+                      {canResume && <div className="text-text3">Resume continues from the next unprocessed row.</div>}
                     </PanelBody>
                   </Panel>
                 </div>
@@ -444,7 +498,16 @@ export default function XlsxFiles() {
                 <PanelTitle>Preview Rows</PanelTitle>
               </PanelHeader>
               <PanelBody className="overflow-auto">
-                {detail.preview_rows?.length ? (
+                {detail.preview_deferred ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="text-sm text-text2">
+                      Preview rows are loaded only when needed so this page opens faster.
+                    </div>
+                    <Button variant="ghost" onClick={loadPreviewRows} disabled={previewLoading}>
+                      {previewLoading ? 'Loading preview...' : 'Load preview rows'}
+                    </Button>
+                  </div>
+                ) : detail.preview_rows?.length ? (
                   <table className="min-w-full text-sm">
                     <thead className="text-text3">
                       <tr className="border-b border-border">
