@@ -433,7 +433,7 @@ def fill_xlsx(
     template_bytes: bytes,
     results: List[Dict],
     wines: Optional[List[Dict]] = None,
-    preserve_all_rows: bool = False,
+    preserve_all_rows: bool = True,
     qa_stats: Optional[Dict[str, int]] = None,
     cleanup_existing: bool = True,
 ) -> bytes:
@@ -521,7 +521,8 @@ def fill_xlsx(
     duplicate_lwin_rows_removed = 0
     if cleanup_existing:
         _remove_empty_placeholder_columns(ws, hdr_row_num)
-        duplicate_lwin_rows_removed = _dedupe_rows_by_lwin(ws, hdr_row_num, col_letter)
+        if not preserve_all_rows:
+            duplicate_lwin_rows_removed = _dedupe_rows_by_lwin(ws, hdr_row_num, col_letter)
     if qa_stats is not None:
         qa_stats["duplicate_lwin_rows_removed"] = int(duplicate_lwin_rows_removed)
 
@@ -623,10 +624,6 @@ def fill_xlsx_progress_fast(
     """
     if not results and not processed_wines:
         return template_bytes
-
-    quick = _fill_xlsx_progress_subset(template_bytes, results, processed_wines)
-    if quick:
-        return quick
 
     ET.register_namespace("", "http://schemas.openxmlformats.org/spreadsheetml/2006/main")
     ns_uri = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -779,6 +776,8 @@ def _fill_xlsx_progress_subset(
     processed rows. This avoids surprising users with a 20k-row "progress" file.
     Final completed exports still use the full workbook path.
     """
+    # Kept as a fallback utility for older callers, but the product behavior is
+    # now to preserve every uploaded row even for progress downloads.
     if not OPENPYXL_OK:
         return None
     processed_rows = sorted({
@@ -1238,11 +1237,33 @@ def get_file_download(file_id: str, kind: str = "original") -> Optional[Dict]:
     if kind == "output":
         output_path = str(record.get("output_path") or "").strip()
         base = Path(record["original_name"]).stem
+        job = load_xlsx_job(record.get("last_job_id") or "")
         candidates = []
         if output_path:
             raw_path = Path(output_path)
             candidates.extend([raw_path, XLSX_OUTPUT_DIR / raw_path.name])
         candidates.append(XLSX_OUTPUT_DIR / _safe_storage_name(f"{file_id}_{base}_filled.xlsx"))
+
+        if (
+            job
+            and job.get("compact_progress_output") == "subset_v4"
+            and job.get("template_bytes")
+        ):
+            repaired = fill_xlsx(
+                job["template_bytes"],
+                list(job.get("results") or []),
+                list(job.get("wines") or []),
+                preserve_all_rows=True,
+            )
+            repair_path = candidates[-1]
+            repair_path.write_bytes(repaired)
+            job["output_bytes"] = repaired
+            job["output_path"] = str(repair_path)
+            job["progress_output_layout"] = "full_v1"
+            job.pop("compact_progress_output", None)
+            save_xlsx_job(str(job.get("job_id") or record.get("last_job_id") or ""), job)
+            update_xlsx_file(file_id, {"output_path": str(repair_path)})
+
         path = first_existing(candidates)
         if path:
             return {
@@ -1250,7 +1271,6 @@ def get_file_download(file_id: str, kind: str = "original") -> Optional[Dict]:
                 "download_name": f"maaike_{base}_filled.xlsx",
             }
 
-        job = load_xlsx_job(record.get("last_job_id") or "")
         if job and job.get("output_bytes"):
             return {
                 "bytes": job["output_bytes"],
@@ -1510,16 +1530,15 @@ def get_job_progress_download(job_id: str) -> Optional[Dict]:
         results = list(j.get("results") or [])
         wines = list(j.get("wines") or [])
         done = int(j.get("done") or 0)
-        preserve_all_rows = bool(j.get("preserve_all_rows"))
         status = j.get("status")
         existing_output = j.get("output_bytes")
         existing_output_path = j.get("output_path")
-        compact_progress_ready = j.get("compact_progress_output") == "subset_v4"
+        full_progress_ready = j.get("progress_output_layout") == "full_v1"
 
     record = get_xlsx_file(str(j.get("file_id") or ""))
     base = Path(record["original_name"]).stem if record else "reviews"
 
-    if status in ("stopped", "done", "error") and compact_progress_ready:
+    if status in ("stopped", "done", "error") and full_progress_ready:
         if existing_output_path and Path(existing_output_path).exists():
             return {
                 "path": str(existing_output_path),
@@ -1544,7 +1563,8 @@ def get_job_progress_download(job_id: str) -> Optional[Dict]:
         current = _jobs.get(job_id)
         if current:
             current["output_bytes"] = output_bytes
-            current["compact_progress_output"] = "subset_v4"
+            current["progress_output_layout"] = "full_v1"
+            current.pop("compact_progress_output", None)
             if output_path:
                 current["output_path"] = str(output_path)
             _snapshot_job(job_id, current)
